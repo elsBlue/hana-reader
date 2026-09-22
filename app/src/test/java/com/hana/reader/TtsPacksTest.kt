@@ -55,6 +55,14 @@ class TtsPacksTest {
             "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Synthesizing…"
         )
         assertEquals("Synthesizing…", synth)
+        val starting = TtsPacks.playerCaption(
+            "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Starting…"
+        )
+        assertEquals("Starting…", starting)
+        val firstLine = TtsPacks.playerCaption(
+            "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Getting first line… 2s"
+        )
+        assertEquals("Getting first line… 2s", firstLine)
     }
 
     @Test

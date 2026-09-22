@@ -81,7 +81,9 @@ object TtsPacks {
         if (status != null && (
             status.contains("Preparing", ignoreCase = true) ||
             status.contains("Synthesizing", ignoreCase = true) ||
-            status.contains("Loading", ignoreCase = true)
+            status.contains("Loading", ignoreCase = true) ||
+            status.contains("Starting", ignoreCase = true) ||
+            status.contains("Getting first", ignoreCase = true)
         )) {
             return status
         }

@@ -223,6 +223,13 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
     var books by remember { mutableStateOf(store.allBooks()) }
     val continueBook = store.latest()?.let { store.book(it.bookId) } ?: books.firstOrNull()
     val player = HanaPlayer.get(context)
+    // Pre-warm voice + first line for Continue before the user taps Listen.
+    LaunchedEffect(continueBook?.id) {
+        val book = continueBook ?: return@LaunchedEffect
+        if (player.state.value.profile == VoiceProfile.Hana) {
+            player.warmPrepare(book.language, book)
+        }
+    }
     var error by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -354,10 +361,10 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     val snap by player.state.collectAsState()
     val saved = store.get(book.id)
     var night by remember { mutableStateOf(false) }
-    // Warm-load neural while the user browses the chapter so Listen is not a cold start.
-    LaunchedEffect(book.id, snap.profile) {
+    // Warm-load neural + pre-buffer first utterance while the user still reads.
+    LaunchedEffect(book.id, snap.profile, saved?.chapterIndex, saved?.sentenceIndex) {
         if (snap.profile == VoiceProfile.Hana) {
-            player.warmPrepare(book.language)
+            player.warmPrepare(book.language, book)
         }
     }
     val bg = if (night) Color(0xFF161310) else Paper
@@ -386,13 +393,27 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
                         colors = ButtonDefaults.buttonColors(containerColor = Rose),
                         shape = CircleShape
                     ) {
+                        val listening = snap.book?.id == book.id && snap.playing
+                        val waitLabel = snap.status?.takeIf { listening && (
+                            it.contains("Starting", true) ||
+                                it.contains("Getting first", true) ||
+                                it.contains("Synthesizing", true) ||
+                                it.contains("Preparing", true) ||
+                                it.contains("Downloading", true)
+                            ) }
                         Icon(
-                            if (snap.book?.id == book.id && snap.playing) Icons.Default.Pause else Icons.Default.Headphones,
+                            if (listening && waitLabel == null) Icons.Default.Pause else Icons.Default.Headphones,
                             null,
                             Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text(if (snap.book?.id == book.id && snap.playing) "Pause" else "Listen with Hana")
+                        Text(
+                            when {
+                                waitLabel != null -> waitLabel
+                                listening -> "Pause"
+                                else -> "Listen with Hana"
+                            }
+                        )
                     }
                 }
             }
