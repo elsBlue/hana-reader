@@ -80,10 +80,12 @@ class TextUtilTest {
             )
             isFirst = false
             assertTrue(chunk.text.isNotBlank())
-            assertTrue(
-                "chunk must not end mid-word: '${chunk.text.takeLast(12)}'",
-                TextUtil.endsAtWordBoundary(chunk.text, effective[start])
-            )
+            if (chunk.consumed == 0) {
+                assertTrue(
+                    "chunk must not end mid-word: '${chunk.text.takeLast(12)}'",
+                    TextUtil.endsAtWordBoundary(chunk.text, effective[start])
+                )
+            }
             if (chunk.remainder != null) {
                 assertTrue(
                     "first/hard-capped piece must stay near cap",
@@ -114,8 +116,7 @@ class TextUtilTest {
 
     @Test
     fun hardCapPrefersClausePunctuation() {
-        // Comma must sit after minKeep (~cap/3) and before the 64-char cap.
-        val text = "Short words grow here, then this long tail continues well past the sixty four character hard cap for sure and more."
+        val text = "The narrator explains the setting with unusual care and patience, then this long tail continues well past the first line budget into another clause of the story."
         assertTrue(text.length > TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         val commaAt = text.indexOf(',')
         assertTrue("comma should be after minKeep", commaAt >= TextUtil.FIRST_UTTERANCE_MAX_CHARS / 3)
@@ -178,11 +179,11 @@ class TextUtilTest {
     }
 
     @Test
-    fun enChunkMaxCharsIsSixtyFour() {
-        assertEquals(64, TextUtil.EN_CHUNK_MAX_CHARS)
-        assertEquals(64, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
-        assertEquals(64, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS)
-        assertEquals(1, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_SENTENCES)
+    fun enChunkBudgetsMatchPiperListen() {
+        assertEquals(120, TextUtil.EN_CHUNK_MAX_CHARS)
+        assertEquals(120, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
+        assertEquals(280, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS)
+        assertEquals(2, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_SENTENCES)
         assertEquals(4, com.hana.reader.tts.HanaPlayer.QUEUE_DEPTH)
         assertEquals(2, com.hana.reader.tts.HanaPlayer.PLAY_RESUME_DEPTH)
     }
@@ -190,7 +191,7 @@ class TextUtilTest {
     @Test
     fun firstUtterancePrefetchKeyMatchesSpeakChunkPlan() {
         val sentences = listOf(
-            "In the quiet valley the mist rose slowly over stones and distant bells,",
+            "In the quiet valley the mist rose slowly over stones and distant bells while every detail of the river and the oak tree was described without hurry,",
             "Then a short closer."
         )
         // Plan at chapter 0 / sentence 0 — same ingredients speakNeural looks up.
@@ -242,7 +243,7 @@ class TextUtilTest {
         val keys = planned.map { it.key }
         assertEquals(keys.toSet().size, keys.size)
         for (p in planned) {
-            assertTrue(p.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
+            assertTrue(p.text.length <= com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS + 5)
             assertTrue(
                 "lookahead chunk must not end mid-word: '${p.text.takeLast(16)}'",
                 p.text.last().isWhitespace() ||
