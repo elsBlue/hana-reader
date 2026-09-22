@@ -1,6 +1,8 @@
 package com.hana.reader.tts
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import com.hana.reader.data.Book
 import com.hana.reader.data.ProgressStore
 import com.hana.reader.data.ReadingProgress
@@ -48,6 +50,8 @@ class HanaPlayer(context: Context) {
     private var prefetchKey: String? = null
     /** After play/restart, first EN neural chunk is short for faster time-to-first-audio. */
     private var firstChunkAfterRestart = true
+    /** Leftover of a hard-capped sentence; spoken before advancing sentenceIndex. */
+    private var sentenceRemainder: String? = null
 
     fun play(book: Book, chapterIndex: Int? = null, sentenceIndex: Int? = null) {
         val saved = store.get(book.id)
@@ -76,6 +80,7 @@ class HanaPlayer(context: Context) {
         prefetch?.cancel()
         prefetch = null
         prefetchKey = null
+        sentenceRemainder = null
         neural.stop()
         system.stop()
         _state.value = _state.value.copy(playing = false)
@@ -102,6 +107,7 @@ class HanaPlayer(context: Context) {
                 se = (sentences(book, ch).size - 1).coerceAtLeast(0)
             } else se = 0
         }
+        sentenceRemainder = null
         _state.value = snap.copy(chapterIndex = ch, sentenceIndex = se)
         persist()
         if (snap.playing) restartSpeak(prepare = true)
@@ -111,6 +117,7 @@ class HanaPlayer(context: Context) {
         val snap = _state.value
         val book = snap.book ?: return
         val ch = (snap.chapterIndex + delta).coerceIn(0, book.chapters.lastIndex)
+        sentenceRemainder = null
         _state.value = snap.copy(chapterIndex = ch, sentenceIndex = 0)
         persist()
         if (snap.playing) restartSpeak(prepare = true)
@@ -160,6 +167,7 @@ class HanaPlayer(context: Context) {
         prefetch?.cancel()
         prefetch = null
         prefetchKey = null
+        sentenceRemainder = null
         firstChunkAfterRestart = true
         neural.stop()
         system.stop()
@@ -263,16 +271,27 @@ class HanaPlayer(context: Context) {
         try {
             val speed = snap.rate
             val sid = TtsPacks.speakerId(book.language, snap.profile, voicePrefs.selectedSid(book.language))
-            // First audible chunk: 1 short sentence (~200 chars) for faster TTFA.
+            // First audible chunk: hard-capped ~100 chars for faster TTFA.
             // Later EN chunks stay modest (2 / ~400) for prosody without long waits.
-            val isFirst = firstChunkAfterRestart
-            firstChunkAfterRestart = false
+            val isFirst = firstChunkAfterRestart && sentenceRemainder == null
+            if (firstChunkAfterRestart) firstChunkAfterRestart = false
+
+            val effectiveList = if (sentenceRemainder != null) {
+                list.toMutableList().also { mutable ->
+                    if (snap.sentenceIndex in mutable.indices) {
+                        mutable[snap.sentenceIndex] = sentenceRemainder!!
+                    }
+                }
+            } else {
+                list
+            }
+
             val maxSentences: Int
             val maxChars: Int
             if (book.language == "en") {
                 if (isFirst) {
                     maxSentences = 1
-                    maxChars = 200
+                    maxChars = TextUtil.FIRST_UTTERANCE_MAX_CHARS
                 } else {
                     maxSentences = 2
                     maxChars = 400
@@ -281,34 +300,67 @@ class HanaPlayer(context: Context) {
                 maxSentences = 2
                 maxChars = 320
             }
-            val (text, consumed) = TextUtil.speakChunk(
-                list,
+            val chunk = TextUtil.speakChunk(
+                effectiveList,
                 snap.sentenceIndex,
                 maxSentences = maxSentences,
-                maxChars = maxChars
+                maxChars = maxChars,
+                isFirst = isFirst
             )
-            if (text.isBlank() || consumed <= 0) {
+            val text = chunk.text
+            val consumed = chunk.consumed
+            sentenceRemainder = chunk.remainder
+            if (text.isBlank() && consumed <= 0 && chunk.remainder == null) {
                 advance(1)
                 return
             }
-            val key = "hana-${snap.chapterIndex}-${snap.sentenceIndex}-c$consumed"
-            val pcm = if (prefetchKey == key) prefetch?.await() else null
+            if (text.isBlank()) {
+                // Empty prefix with remainder — continue without playing.
+                if (_state.value.playing) continueSpeaking()
+                return
+            }
+            val remTag = if (chunk.remainder != null) "r" else "f"
+            val key = "hana-${snap.chapterIndex}-${snap.sentenceIndex}-c$consumed-$remTag-${text.length}"
+            val cached = if (prefetchKey == key) prefetch?.await() else null
             prefetch?.cancel()
             prefetch = null
             prefetchKey = null
-            if (pcm == null) {
+            if (cached == null) {
                 _state.value = _state.value.copy(status = "Synthesizing…")
             }
-            val audio = pcm ?: withContext(Dispatchers.Default) {
+            val started = SystemClock.elapsedRealtime()
+            val audio = cached ?: withContext(Dispatchers.Default) {
                 neural.synthesize(text, book.language, sid, speed)
             }
+            val generateMs = SystemClock.elapsedRealtime() - started
+            val audioMs = if (audio.sampleRate > 0) {
+                (audio.samples.size * 1000L) / audio.sampleRate
+            } else {
+                0L
+            }
+            val rtf = if (audioMs > 0) generateMs.toDouble() / audioMs.toDouble() else 0.0
+            Log.i(
+                TAG,
+                "chars=${text.length} generateMs=$generateMs audioMs=$audioMs rtf=${"%.2f".format(rtf)} " +
+                    "prefetchHit=${cached != null} first=$isFirst"
+            )
             // Prefetch next while current plays (engine lock serializes generate).
-            prefetchNext(book, snap, consumed, sid, speed)
+            prefetchNext(book, snap, consumed, chunk.remainder, sid, speed)
             _state.value = _state.value.copy(status = null)
             withContext(Dispatchers.IO) { neural.play(audio) }
-            if (_state.value.playing) advance(consumed)
+            if (_state.value.playing) {
+                if (chunk.remainder != null) {
+                    // Same sentenceIndex; remainder already stored.
+                    continueSpeaking()
+                } else if (consumed > 0) {
+                    advance(consumed)
+                } else {
+                    advance(1)
+                }
+            }
         } catch (t: Throwable) {
             if (t is kotlinx.coroutines.CancellationException) throw t
+            sentenceRemainder = null
             _state.value = _state.value.copy(usingNeural = false, status = t.message?.take(48) ?: "synth failed")
             val text = list.getOrNull(snap.sentenceIndex).orEmpty()
             val key = "hana-${snap.chapterIndex}-${snap.sentenceIndex}"
@@ -324,32 +376,82 @@ class HanaPlayer(context: Context) {
         book: Book,
         snap: PlayerSnapshot,
         consumed: Int,
+        remainder: String?,
         sid: Int,
         speed: Float
     ) {
         var ch = snap.chapterIndex
-        var se = snap.sentenceIndex + consumed
+        var se = snap.sentenceIndex
         var list = sentences(book, ch)
-        if (se >= list.size) {
-            if (ch >= book.chapters.lastIndex) return
-            ch += 1
-            se = 0
-            list = sentences(book, ch)
+        val nextText: String
+        val nextConsumed: Int
+        val nextRemainder: String?
+        val remTag: String
+        if (remainder != null) {
+            val injected = list.toMutableList().also {
+                if (se in it.indices) it[se] = remainder
+            }
+            val maxSentences = if (book.language == "en") 2 else 2
+            val maxChars = if (book.language == "en") 400 else 320
+            val next = TextUtil.speakChunk(injected, se, maxSentences, maxChars, isFirst = false)
+            nextText = next.text
+            nextConsumed = next.consumed
+            nextRemainder = next.remainder
+            remTag = if (nextRemainder != null) "r" else "f"
+        } else {
+            se = snap.sentenceIndex + consumed
+            if (se >= list.size) {
+                if (ch >= book.chapters.lastIndex) return
+                ch += 1
+                se = 0
+                list = sentences(book, ch)
+            }
+            val maxSentences = if (book.language == "en") 2 else 2
+            val maxChars = if (book.language == "en") 400 else 320
+            val next = TextUtil.speakChunk(list, se, maxSentences, maxChars, isFirst = false)
+            nextText = next.text
+            nextConsumed = next.consumed
+            nextRemainder = next.remainder
+            remTag = if (nextRemainder != null) "r" else "f"
         }
-        val maxSentences = if (book.language == "en") 2 else 2
-        val maxChars = if (book.language == "en") 400 else 320
-        val (next, nextConsumed) = TextUtil.speakChunk(list, se, maxSentences, maxChars)
-        if (next.isBlank() || nextConsumed <= 0) return
-        val key = "hana-$ch-$se-c$nextConsumed"
+        if (nextText.isBlank() || (nextConsumed <= 0 && nextRemainder == null)) return
+        val key = "hana-$ch-$se-c$nextConsumed-$remTag-${nextText.length}"
         prefetchKey = key
         prefetch = scope.async(Dispatchers.Default) {
-            runCatching { neural.synthesize(next, book.language, sid, speed) }.getOrNull()
+            runCatching { neural.synthesize(nextText, book.language, sid, speed) }.getOrNull()
         }
     }
 
+    /**
+     * Move forward after a finished chunk without restartSpeak — keeps prefetch alive
+     * and does not re-arm the first-utterance hard-cap.
+     */
     private fun advance(by: Int) {
         if (!_state.value.playing) return
-        skipSentence(by.coerceAtLeast(1))
+        val snap = _state.value
+        val book = snap.book ?: return
+        var ch = snap.chapterIndex
+        var se = snap.sentenceIndex + by.coerceAtLeast(1)
+        val list = sentences(book, ch)
+        if (se >= list.size) {
+            if (ch < book.chapters.lastIndex) {
+                ch += 1
+                se = 0
+            } else {
+                pause()
+                return
+            }
+        }
+        sentenceRemainder = null
+        _state.value = snap.copy(chapterIndex = ch, sentenceIndex = se)
+        persist()
+        continueSpeaking()
+    }
+
+    private fun continueSpeaking() {
+        speakJob = scope.launch {
+            if (_state.value.playing) speakOnce()
+        }
     }
 
     private fun sentences(book: Book, chapterIndex: Int): List<String> {
@@ -371,6 +473,8 @@ class HanaPlayer(context: Context) {
     }
 
     companion object {
+        private const val TAG = "HanaTts"
+
         @Volatile private var instance: HanaPlayer? = null
         fun get(context: Context): HanaPlayer {
             return instance ?: synchronized(this) {

@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.util.Log
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
@@ -29,6 +30,24 @@ class NeuralTtsEngine {
             loadedLang = null
             session = OfflineTts(config = configFor(files))
             loadedLang = language
+            // Discarded warm-up so the first real Listen avoids cold-start graph cost.
+            // Soft-fail: session stays loaded even if warm-up throws.
+            runCatching {
+                val sid = when (files.kind) {
+                    NeuralKind.Kokoro -> TtsPacks.KOKORO_HANA_SID
+                    NeuralKind.Piper -> TtsPacks.PIPER_SID
+                }
+                val warmText = if (language == "id") "Siap." else "Ready."
+                val gen = GenerationConfig(
+                    sid = sid,
+                    speed = 1f,
+                    silenceScale = TtsPacks.SILENCE_SCALE
+                )
+                session?.generateWithConfig(text = warmText, config = gen)
+                // PCM discarded intentionally
+            }.onFailure { e ->
+                Log.w(TAG, "Warm-up synth failed (session still loaded): ${e.message}")
+            }
         }
     }
 
@@ -155,7 +174,8 @@ class NeuralTtsEngine {
                     dataDir = files.dataDir.absolutePath,
                     lengthScale = 1.0f
                 ),
-                numThreads = 2,
+                // 4 can cut first-generate latency; revert to 2 if devices thermal-throttle.
+                numThreads = 4,
                 debug = false,
                 provider = "cpu"
             )
@@ -178,5 +198,9 @@ class NeuralTtsEngine {
             maxNumSentences = maxSentences,
             silenceScale = TtsPacks.SILENCE_SCALE
         )
+    }
+
+    companion object {
+        private const val TAG = "HanaTts"
     }
 }
