@@ -100,6 +100,8 @@ class TtsPacksTest {
         assertEquals(TtsPacks.EN_WARM, TtsPacks.packForVoice("en_amy"))
         assertNull(TtsPacks.packForVoice("af_bella"))
         assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_news"))
+        assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_cerita"))
+        assertEquals("Cerita", TtsPacks.ID.displayName)
         assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN_WARM), TtsPacks.packsForLanguage("en"))
         val caption = TtsPacks.playerCaption(
             "en",
@@ -129,8 +131,17 @@ class TtsPacksTest {
         assertEquals(0.667f, warm.noiseScale)
         assertEquals(0.85f, warm.noiseScaleW)
         val id = TtsPacks.acousticFor(TtsPacks.ID.packId)
-        assertEquals(1.18f, id.lengthScale)
+        assertEquals(1.30f, id.lengthScale)
         assertEquals(0.667f, id.noiseScale)
+        assertEquals(0.80f, id.noiseScaleW)
+    }
+
+    @Test
+    fun busyMessageIsCalmAndLocalized() {
+        assertEquals("Preparing Warm…", TtsPacks.busyMessage("Warm", "en", downloading = false))
+        assertEquals("Downloading Soft…", TtsPacks.busyMessage("Soft", "en", downloading = true))
+        assertEquals("Menyiapkan Cerita…", TtsPacks.busyMessage("Cerita", "id", downloading = false))
+        assertEquals("Mengunduh Cerita…", TtsPacks.busyMessage("Cerita", "id", downloading = true))
     }
 
     @Test

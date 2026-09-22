@@ -33,7 +33,10 @@ data class PlayerSnapshot(
     val rate: Float = TtsPacks.DEFAULT_RATE,
     val usingNeural: Boolean = false,
     val downloadProgress: Float? = null,
-    val status: String? = null
+    val status: String? = null,
+    /** True while OfflineTts prepare / voice switch / pack download blocks Listen comfort. */
+    val busy: Boolean = false,
+    val busyMessage: String? = null,
 )
 
 class HanaPlayer(context: Context) {
@@ -189,48 +192,76 @@ class HanaPlayer(context: Context) {
      * UI must call this instead of touching NeuralTtsEngine directly.
      */
     suspend fun switchVoice(language: String, voiceId: String) {
+        val voice = VoiceCatalog.find(voiceId)
+        val label = voice?.label ?: VoiceCatalog.find(VoiceCatalog.canonicalId(voiceId))?.label
+            ?: if (language == "id") "Cerita" else "Soft"
         prepareMutex.withLock {
-            voicePrefs.setSelectedVoiceId(language, voiceId)
-            _state.value = _state.value.copy(profile = VoiceProfile.Hana, status = "Preparing voice…")
-
-            speakJob?.cancel()
-            speakJob = null
-            fillJob?.cancel()
-            fillJob = null
-            storyStarted = false
-            sentenceRemainder = null
-            clearReadyQueue()
-            neural.stop()
-            system.stop()
-            if (_state.value.playing) {
-                _state.value = _state.value.copy(playing = false)
-                persist()
-            }
-            // synthEpoch already bumped in clearReadyQueue; bump again so stragglers drop.
-            synthEpoch.incrementAndGet()
-            neural.release()
-
-            val pack = TtsPacks.packForVoice(voiceId)
-                ?: TtsPacks.forLanguage(language)
-                ?: error("Unknown voice $voiceId")
-            var files = models.files(pack.storageKey)
-            if (files == null) {
+            try {
+                voicePrefs.setSelectedVoiceId(language, voiceId)
                 _state.value = _state.value.copy(
-                    downloadProgress = 0f,
-                    status = "Downloading ${pack.displayName}…"
+                    profile = VoiceProfile.Hana,
+                    status = "Preparing voice…",
+                    busy = true,
+                    busyMessage = TtsPacks.busyMessage(label, language, downloading = false),
                 )
-                files = models.ensure(pack.storageKey) { p ->
+
+                speakJob?.cancel()
+                speakJob = null
+                fillJob?.cancel()
+                fillJob = null
+                storyStarted = false
+                sentenceRemainder = null
+                clearReadyQueue()
+                neural.stop()
+                system.stop()
+                if (_state.value.playing) {
+                    _state.value = _state.value.copy(playing = false)
+                    persist()
+                }
+                // synthEpoch already bumped in clearReadyQueue; bump again so stragglers drop.
+                synthEpoch.incrementAndGet()
+                neural.release()
+
+                val pack = TtsPacks.packForVoice(voiceId)
+                    ?: TtsPacks.forLanguage(language)
+                    ?: error("Unknown voice $voiceId")
+                var files = models.files(pack.storageKey)
+                if (files == null) {
                     _state.value = _state.value.copy(
-                        downloadProgress = p,
-                        status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%"
+                        downloadProgress = 0f,
+                        status = "Downloading ${pack.displayName}…",
+                        busy = true,
+                        busyMessage = TtsPacks.busyMessage(label, language, downloading = true),
+                    )
+                    files = models.ensure(pack.storageKey) { p ->
+                        _state.value = _state.value.copy(
+                            downloadProgress = p,
+                            status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%",
+                            busy = true,
+                            busyMessage = TtsPacks.busyMessage(label, language, downloading = true),
+                        )
+                    }
+                } else {
+                    _state.value = _state.value.copy(
+                        busy = true,
+                        busyMessage = TtsPacks.busyMessage(label, language, downloading = false),
                     )
                 }
+                val modelFiles = files ?: error("Voice pack missing after ensure")
+                withContext(Dispatchers.Default) {
+                    neural.prepare(language, modelFiles, pack.packId)
+                }
+                markNeuralReady()
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                _state.value = _state.value.copy(
+                    busy = false,
+                    busyMessage = null,
+                    downloadProgress = null,
+                    status = t.message?.take(48) ?: "Switch failed",
+                )
+                throw t
             }
-            val modelFiles = files ?: error("Voice pack missing after ensure")
-            withContext(Dispatchers.Default) {
-                neural.prepare(language, modelFiles, pack.packId)
-            }
-            markNeuralReady()
         }
     }
 
@@ -381,21 +412,28 @@ class HanaPlayer(context: Context) {
             try {
                 val key = pack.storageKey
                 var files = models.files(key)
+                val voiceLabel = voicePrefs.selectedVoice(language)?.label ?: pack.displayName
                 if (files == null) {
                     _state.value = _state.value.copy(
                         downloadProgress = 0f,
-                        status = "Downloading ${pack.displayName}…"
+                        status = "Downloading ${pack.displayName}…",
+                        busy = true,
+                        busyMessage = TtsPacks.busyMessage(voiceLabel, language, downloading = true),
                     )
                     files = models.ensure(key) { p ->
                         _state.value = _state.value.copy(
                             downloadProgress = p,
-                            status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%"
+                            status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%",
+                            busy = true,
+                            busyMessage = TtsPacks.busyMessage(voiceLabel, language, downloading = true),
                         )
                     }
                 } else {
                     _state.value = _state.value.copy(
                         status = "Preparing voice…",
-                        downloadProgress = null
+                        downloadProgress = null,
+                        busy = true,
+                        busyMessage = TtsPacks.busyMessage(voiceLabel, language, downloading = false),
                     )
                 }
                 val modelFiles = files ?: error("Voice pack missing after ensure")
@@ -411,7 +449,9 @@ class HanaPlayer(context: Context) {
                 _state.value = _state.value.copy(
                     usingNeural = false,
                     downloadProgress = null,
-                    status = why
+                    status = why,
+                    busy = false,
+                    busyMessage = null,
                 )
             }
         }
@@ -749,13 +789,17 @@ class HanaPlayer(context: Context) {
             _state.value = _state.value.copy(
                 usingNeural = true,
                 downloadProgress = null,
-                status = status
+                status = status,
+                busy = false,
+                busyMessage = null,
             )
         } else {
             _state.value = _state.value.copy(
                 usingNeural = true,
                 downloadProgress = null,
-                status = "Neural voice ready"
+                status = "Neural voice ready",
+                busy = false,
+                busyMessage = null,
             )
         }
     }

@@ -22,17 +22,31 @@ object VoiceCatalog {
         ),
     )
 
+    /** Soft offline Indonesian — same official Piper news_tts pack, storytelling label. */
     val INDONESIAN = listOf(
-        CatalogVoice("id_news", "id", 0, "news", "News", "Slower offline Piper, with pauses", TtsPacks.ID.packId),
+        CatalogVoice(
+            "id_cerita", "id", 0, "cerita", "Cerita",
+            "Softer storytelling pace — offline Indonesian", TtsPacks.ID.packId
+        ),
     )
+
+    /** Legacy prefs / captions after the News → Cerita rename. */
+    private val ALIASES = mapOf("id_news" to "id_cerita")
 
     fun all(): List<CatalogVoice> = ENGLISH + INDONESIAN
 
     fun forLanguage(language: String): List<CatalogVoice> =
         if (language == "id") INDONESIAN else ENGLISH
 
-    fun find(id: String): CatalogVoice? = all().firstOrNull { it.id == id }
+    fun find(id: String): CatalogVoice? {
+        all().firstOrNull { it.id == id }?.let { return it }
+        val alias = ALIASES[id] ?: return null
+        return all().firstOrNull { it.id == alias }
+    }
 
     fun findBySid(language: String, sid: Int): CatalogVoice? =
         forLanguage(language).firstOrNull { it.sid == sid }
+
+    /** Canonical id after News → Cerita (and future) renames. */
+    fun canonicalId(id: String): String = ALIASES[id] ?: id
 }

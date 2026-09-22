@@ -22,13 +22,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Headphones
@@ -81,6 +81,7 @@ import com.hana.reader.data.ProgressStore
 import com.hana.reader.data.TextUtil
 import com.hana.reader.tts.HanaPlayer
 import com.hana.reader.tts.TtsPacks
+import com.hana.reader.tts.VoiceCatalog
 import com.hana.reader.tts.VoiceProfile
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
@@ -124,6 +125,7 @@ fun HanaApp() {
                     }
                 }
                 MiniPlayer(nav, Modifier.align(Alignment.BottomCenter))
+                VoiceBusyOverlay()
             }
         }
     }
@@ -375,9 +377,9 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     val snap by player.state.collectAsState()
     val saved = store.get(book.id)
     var night by remember { mutableStateOf(false) }
-    // Warm-load neural + pre-buffer first utterance while the user still reads.
-    LaunchedEffect(book.id, snap.profile, saved?.chapterIndex, saved?.sentenceIndex) {
-        if (snap.profile == VoiceProfile.Hana) {
+    // Once per book — do not restart warmPrepare on every player status tick.
+    LaunchedEffect(book.id) {
+        if (player.state.value.profile == VoiceProfile.Hana) {
             runCatching { player.warmPrepare(book.language, book) }
         }
     }
@@ -391,61 +393,72 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
             Text(book.title, modifier = Modifier.weight(1f), maxLines = 1, color = fg, fontWeight = FontWeight.Medium)
             TextButton(onClick = { night = !night }) { Text(if (night) "Paper" else "Night", color = Muted) }
         }
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 120.dp)) {
-            Row(Modifier.padding(vertical = 16.dp)) {
-                Cover(book, Modifier.size(72.dp, 96.dp))
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(book.title, fontFamily = FontFamily.Serif, fontSize = 26.sp, color = fg)
-                    Text(book.author, color = Muted, fontSize = 14.sp)
-                    Spacer(Modifier.height(10.dp))
-                    Button(
-                        onClick = {
-                            if (snap.book?.id == book.id && snap.playing) player.pause()
-                            else player.play(book, saved?.chapterIndex, saved?.sentenceIndex)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Rose),
-                        shape = CircleShape
-                    ) {
-                        val listening = snap.book?.id == book.id && snap.playing
-                        val waitLabel = snap.status?.takeIf { listening && (
-                            it.contains("Starting", true) ||
-                                it.contains("Getting first", true) ||
-                                it.contains("Synthesizing", true) ||
-                                it.contains("Preparing", true) ||
-                                it.contains("Downloading", true)
-                            ) }
-                        Icon(
-                            if (listening && waitLabel == null) Icons.Default.Pause else Icons.Default.Headphones,
-                            null,
-                            Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            when {
-                                waitLabel != null -> waitLabel
-                                listening -> "Pause"
-                                else -> "Listen with Hana"
-                            }
-                        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(bottom = 160.dp)
+        ) {
+            item(key = "header-${book.id}") {
+                Row(Modifier.padding(vertical = 16.dp)) {
+                    Cover(book, Modifier.size(72.dp, 96.dp))
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(book.title, fontFamily = FontFamily.Serif, fontSize = 26.sp, color = fg)
+                        Text(book.author, color = Muted, fontSize = 14.sp)
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                if (snap.book?.id == book.id && snap.playing) player.pause()
+                                else player.play(book, saved?.chapterIndex, saved?.sentenceIndex)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Rose),
+                            shape = CircleShape,
+                            enabled = !snap.busy
+                        ) {
+                            val listening = snap.book?.id == book.id && snap.playing
+                            val waitLabel = snap.status?.takeIf { listening && (
+                                it.contains("Starting", true) ||
+                                    it.contains("Getting first", true) ||
+                                    it.contains("Synthesizing", true) ||
+                                    it.contains("Preparing", true) ||
+                                    it.contains("Downloading", true)
+                                ) }
+                            Icon(
+                                if (listening && waitLabel == null) Icons.Default.Pause else Icons.Default.Headphones,
+                                null,
+                                Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                when {
+                                    waitLabel != null -> waitLabel
+                                    listening -> "Pause"
+                                    else -> "Listen with Hana"
+                                }
+                            )
+                        }
                     }
                 }
             }
-            book.chapters.forEachIndexed { ci, chapter ->
-                Text(chapter.title, fontFamily = FontFamily.Serif, fontSize = 20.sp, color = fg, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-                val sentences = TextUtil.splitSentences(chapter.body)
+            itemsIndexed(book.chapters, key = { index, chapter -> "${book.id}-$index-${chapter.id}" }) { ci, chapter ->
                 Text(
-                    buildString {
-                        sentences.forEachIndexed { si, s ->
-                            append(s)
-                            if (si != sentences.lastIndex) append(" ")
-                        }
-                    },
+                    chapter.title,
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 20.sp,
+                    color = fg,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 8.dp)
+                )
+                val body = remember(chapter.id, chapter.body) {
+                    TextUtil.splitSentences(chapter.body).joinToString(" ")
+                }
+                Text(
+                    body,
                     color = fg,
                     fontFamily = FontFamily.Serif,
                     fontSize = 18.sp,
                     lineHeight = 30.sp,
-                    modifier = Modifier.clickable {
+                    modifier = Modifier.clickable(enabled = !snap.busy) {
                         player.play(book, ci, 0)
                     }
                 )
@@ -460,76 +473,163 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
     val player = HanaPlayer.get(context)
     val snap by player.state.collectAsState()
     val book = snap.book ?: return
+    val scope = rememberCoroutineScope()
+    val prefs = remember { player.voicePreferences() }
+    val lang = book.language
+    val voices = remember(lang) { VoiceCatalog.forLanguage(lang) }
+    val selectedId = prefs.selectedVoiceId(lang)
+    val switching = snap.busy
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(12.dp)
-            .clickable { nav.navigate("read/${book.id}") },
+            .padding(12.dp),
         color = PaperElevated,
         shape = RoundedCornerShape(20.dp),
         shadowElevation = 8.dp
     ) {
-        Row(
-            Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Cover(book, Modifier.size(40.dp, 52.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(book.title, maxLines = 1, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                val lang = book.language
-                val selectedVoice = HanaPlayer.get(LocalContext.current).voicePreferences().selectedVoice(lang)
-                val caption = TtsPacks.playerCaption(
-                    language = lang,
-                    profile = snap.profile,
-                    usingNeural = snap.usingNeural,
-                    downloading = snap.downloadProgress != null,
-                    status = snap.status,
-                    selectedVoiceName = selectedVoice?.name,
-                    selectedVoiceId = selectedVoice?.id
+        Column(Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Cover(
+                    book,
+                    Modifier
+                        .size(40.dp, 52.dp)
+                        .clickable { nav.navigate("read/${book.id}") }
                 )
-                Text(
-                    caption,
-                    color = Muted,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable {
-                        // Short tap: toggle Hana/system. Open Voices from Library icon.
-                        player.setProfile(
-                            if (snap.profile == VoiceProfile.Hana) VoiceProfile.Clear else VoiceProfile.Hana
+                Spacer(Modifier.width(10.dp))
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clickable { nav.navigate("read/${book.id}") }
+                ) {
+                    Text(book.title, maxLines = 1, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    val selectedVoice = VoiceCatalog.find(selectedId)
+                    val caption = TtsPacks.playerCaption(
+                        language = lang,
+                        profile = snap.profile,
+                        usingNeural = snap.usingNeural,
+                        downloading = snap.downloadProgress != null,
+                        status = snap.status,
+                        selectedVoiceName = selectedVoice?.name,
+                        selectedVoiceId = selectedVoice?.id
+                    )
+                    Text(
+                        caption,
+                        color = Muted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable(enabled = !switching) {
+                            player.setProfile(
+                                if (snap.profile == VoiceProfile.Hana) VoiceProfile.Clear else VoiceProfile.Hana
+                            )
+                        }
+                    )
+                    snap.downloadProgress?.let { p ->
+                        LinearProgressIndicator(
+                            progress = { p },
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .fillMaxWidth(),
+                            color = Rose,
+                            trackColor = Subtle
                         )
                     }
-                )
-                snap.downloadProgress?.let { p ->
-                    LinearProgressIndicator(
-                        progress = p,
-                        modifier = Modifier
-                            .padding(top = 4.dp)
-                            .fillMaxWidth(),
-                        color = Rose,
-                        trackColor = Subtle
+                }
+                IconButton(onClick = { player.skipChapter(-1) }, enabled = !switching) {
+                    Icon(Icons.Default.SkipPrevious, "Previous", tint = Muted)
+                }
+                IconButton(
+                    onClick = { player.toggle() },
+                    enabled = !switching,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Ink, CircleShape)
+                ) {
+                    Icon(
+                        if (snap.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        if (snap.playing) "Pause" else "Play",
+                        tint = Paper
                     )
                 }
+                IconButton(onClick = { player.skipChapter(1) }, enabled = !switching) {
+                    Icon(Icons.Default.SkipNext, "Next", tint = Muted)
+                }
             }
-            IconButton(onClick = { player.skipChapter(-1) }) {
-                Icon(Icons.Default.SkipPrevious, "Previous", tint = Muted)
-            }
-            IconButton(
-                onClick = { player.toggle() },
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(Ink, CircleShape)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    if (snap.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    if (snap.playing) "Pause" else "Play",
-                    tint = Paper
-                )
+                voices.forEach { voice ->
+                    val on = voice.id == selectedId && snap.profile == VoiceProfile.Hana
+                    Text(
+                        voice.label,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (on) Rose.copy(alpha = 0.18f) else Subtle)
+                            .clickable(enabled = !switching) {
+                                if (voice.id == selectedId && snap.profile == VoiceProfile.Hana) return@clickable
+                                scope.launch {
+                                    runCatching { player.switchVoice(lang, voice.id) }
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        color = if (on) Rose else Muted,
+                        fontSize = 12.sp,
+                        fontWeight = if (on) FontWeight.Medium else FontWeight.Normal
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(
+                    onClick = { nav.navigate("voices") },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.RecordVoiceOver, contentDescription = "All voices", tint = Muted)
+                }
             }
-            IconButton(onClick = { player.skipChapter(1) }) {
-                Icon(Icons.Default.SkipNext, "Next", tint = Muted)
+        }
+    }
+}
+
+@Composable
+private fun VoiceBusyOverlay() {
+    val context = LocalContext.current
+    val player = HanaPlayer.get(context)
+    val snap by player.state.collectAsState()
+    if (!snap.busy) return
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Ink.copy(alpha = 0.35f))
+            .clickable(enabled = true, onClick = { /* consume taps while OfflineTts switches */ }),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = PaperElevated,
+            shape = RoundedCornerShape(20.dp),
+            shadowElevation = 6.dp
+        ) {
+            Column(
+                Modifier.padding(horizontal = 28.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator(color = Rose, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    snap.busyMessage ?: "Preparing…",
+                    color = Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    "Please wait — voice is loading",
+                    color = Muted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
         }
     }
