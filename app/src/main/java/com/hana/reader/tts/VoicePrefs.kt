@@ -5,17 +5,27 @@ import android.content.Context
 object VoiceDefaults {
     const val COMFORT_FLAG = "comfort_listen_v1"
 
+    private val WARM_LEGACY_IDS = setOf(
+        "af_bella", "af_nicole", "af_sky", "bf_emma", "bf_isabella"
+    )
+
     fun defaultId(language: String): String =
         if (language == "id") "id_news" else "en_lessac"
 
     /**
-     * Old factory default was Bella/Kokoro, which waits twice on slower phones.
-     * Treat unset + Bella as Smooth unless the user already picked another voice.
+     * Old factory default was Bella/Kokoro. Treat unset + Bella as Smooth
+     * unless the user already picked another voice.
      */
     fun englishIdAfterComfortMigration(saved: String?): String {
         if (saved == null || saved == "af_bella") return "en_lessac"
         if (VoiceCatalog.find(saved) != null) return saved
-        return "en_lessac"
+        return resolveEnglishId(saved)
+    }
+
+    /** Map leftover Kokoro voice ids after the pack was removed. */
+    fun resolveEnglishId(saved: String?): String {
+        if (saved != null && VoiceCatalog.find(saved) != null) return saved
+        return if (saved in WARM_LEGACY_IDS) "en_amy" else "en_lessac"
     }
 }
 
@@ -27,8 +37,12 @@ class VoicePrefs(context: Context) {
         val key = key(language)
         val saved = prefs.getString(key, null)
         if (saved != null && VoiceCatalog.find(saved) != null) return saved
-        val migrated = VoiceDefaults.defaultId(language)
-        if (saved != null && saved != migrated) {
+        val migrated = if (language == "id") {
+            VoiceDefaults.defaultId("id")
+        } else {
+            VoiceDefaults.resolveEnglishId(saved)
+        }
+        if (saved != migrated) {
             prefs.edit().putString(key, migrated).apply()
         }
         return migrated
@@ -36,7 +50,7 @@ class VoicePrefs(context: Context) {
 
     fun selectedSid(language: String): Int {
         return VoiceCatalog.find(selectedVoiceId(language))?.sid
-            ?: if (language == "id") 0 else TtsPacks.PIPER_SID
+            ?: TtsPacks.PIPER_SID
     }
 
     fun setSelectedVoiceId(language: String, voiceId: String) {

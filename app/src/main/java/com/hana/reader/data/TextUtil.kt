@@ -2,13 +2,11 @@ package com.hana.reader.data
 
 object TextUtil {
     /**
-     * Continuous EN neural chunk budget (first + later). Sized so synth time at
-     * RTF≈0.8–1.2 stays ≤ play time of the previous chunk — enables prefetch
-     * to keep up without mid-listen gaps.
+     * First-line budget for Piper English. Later chunks use a larger cap in HanaPlayer.
      */
-    const val EN_CHUNK_MAX_CHARS = 64
+    const val EN_CHUNK_MAX_CHARS = 120
 
-    /** Hard cap for the first audible neural chunk (faster TTFA). Same as EN continuous budget. */
+    /** Hard cap for the first audible neural chunk (faster TTFA). */
     const val FIRST_UTTERANCE_MAX_CHARS = EN_CHUNK_MAX_CHARS
 
     fun normalizeForTts(text: String): String {
@@ -18,7 +16,7 @@ object TextUtil {
         t = t.replace(Regex("[\\u2018\\u2019]"), "'")
         t = t.replace("…", "...")
         t = t.replace(Regex("\\s+"), " ").trim()
-        // Light expansions that help espeak/Kokoro cadence on ebook text
+        // Light expansions that help espeak/Piper cadence on ebook text
         t = t.replace(Regex("\\bMr\\."), "Mister")
         t = t.replace(Regex("\\bMrs\\."), "Missus")
         t = t.replace(Regex("\\bMs\\."), "Miss")
@@ -135,11 +133,7 @@ object TextUtil {
         if (start !in sentences.indices) return SpeakChunkResult("", 0)
 
         val sentenceLimit = if (isFirst) 1 else maxSentences
-        val charLimit = if (isFirst) {
-            FIRST_UTTERANCE_MAX_CHARS.coerceAtMost(maxChars)
-        } else {
-            maxChars
-        }
+        val charLimit = maxChars
 
         val parts = ArrayList<String>(sentenceLimit)
         var chars = 0

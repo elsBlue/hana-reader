@@ -257,7 +257,7 @@ class HanaPlayer(context: Context) {
     private fun activePack(language: String): TtsPack {
         return TtsPacks.packForVoice(voicePrefs.selectedVoiceId(language))
             ?: TtsPacks.forLanguage(language)
-            ?: TtsPacks.EN
+            ?: TtsPacks.EN_SMOOTH
     }
 
     private suspend fun prepareNeuralIfNeeded(language: String) {
@@ -373,7 +373,7 @@ class HanaPlayer(context: Context) {
                     "pack=${activePack(book.language).packId}"
             )
             val pack = activePack(book.language)
-            val hint = if (rtf >= 1.15 && pack.kind == NeuralKind.Kokoro) {
+            val hint = if (rtf >= 1.15) {
                 "Slow on this phone — Voices → Smooth"
             } else {
                 null
@@ -836,11 +836,12 @@ class HanaPlayer(context: Context) {
         const val QUEUE_DEPTH = 4
         /** After a starve, fill aims to have this many extra chunks ready. */
         const val PLAY_RESUME_DEPTH = 2
-        /** EN continuous: 1 sentence / ~64 chars for first and later (RTF keep-up). */
-        const val EN_LATER_MAX_SENTENCES = 1
-        const val EN_LATER_MAX_CHARS = TextUtil.EN_CHUNK_MAX_CHARS
+        /** EN Piper: first line short enough to start, later lines long enough to keep up. */
+        const val EN_LATER_MAX_SENTENCES = 2
+        const val EN_LATER_MAX_CHARS = 280
         const val ID_LATER_MAX_SENTENCES = 2
         const val ID_LATER_MAX_CHARS = 280
+        const val EN_FIRST_MAX_CHARS = 120
 
         @Volatile private var instance: HanaPlayer? = null
         fun get(context: Context): HanaPlayer {
@@ -849,17 +850,16 @@ class HanaPlayer(context: Context) {
             }
         }
 
+        @Suppress("UNUSED_PARAMETER")
         fun chunkLimits(
             language: String,
             isFirst: Boolean,
-            kind: NeuralKind = NeuralKind.Kokoro
+            kind: NeuralKind = NeuralKind.Piper
         ): Pair<Int, Int> {
-            if (kind == NeuralKind.Piper && language == "en") {
-                return if (isFirst) 1 to 120 else 2 to 280
-            }
             return when {
-                isFirst -> 1 to TextUtil.FIRST_UTTERANCE_MAX_CHARS
+                language == "en" && isFirst -> 1 to EN_FIRST_MAX_CHARS
                 language == "en" -> EN_LATER_MAX_SENTENCES to EN_LATER_MAX_CHARS
+                isFirst -> 1 to EN_FIRST_MAX_CHARS
                 else -> ID_LATER_MAX_SENTENCES to ID_LATER_MAX_CHARS
             }
         }
@@ -903,7 +903,7 @@ class HanaPlayer(context: Context) {
             sentenceIndex: Int,
             sentences: List<String>,
             language: String = "en",
-            kind: NeuralKind = NeuralKind.Kokoro
+            kind: NeuralKind = NeuralKind.Piper
         ): PlannedUtterance? {
             if (sentenceIndex !in sentences.indices) return null
             val (maxSentences, maxChars) = chunkLimits(language, isFirst = true, kind)
@@ -937,7 +937,7 @@ class HanaPlayer(context: Context) {
             language: String,
             isFirst: Boolean,
             count: Int,
-            kind: NeuralKind = NeuralKind.Kokoro
+            kind: NeuralKind = NeuralKind.Piper
         ): List<PlannedChunk> {
             val out = ArrayList<PlannedChunk>(count)
             var ch = chapterIndex

@@ -269,7 +269,7 @@ class TextUtilTest {
     @Test
     fun firstAndLaterEnChunksShareBudget() {
         val long = "Words without commas just keep going past the continuous english budget into another phrase of the story here."
-        val first = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = 64, isFirst = true)
+        val first = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = TextUtil.EN_CHUNK_MAX_CHARS, isFirst = true)
         val later = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = TextUtil.EN_CHUNK_MAX_CHARS, isFirst = false)
         assertTrue(first.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
         assertTrue(later.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
@@ -278,7 +278,7 @@ class TextUtilTest {
     }
 
     @Test
-    fun piperEnChunksAreLargerThanKokoro() {
+    fun piperEnChunksStayAheadOfPlayback() {
         val first = com.hana.reader.tts.HanaPlayer.chunkLimits(
             "en", true, com.hana.reader.tts.NeuralKind.Piper
         )
@@ -289,10 +289,6 @@ class TextUtilTest {
         assertEquals(120, first.second)
         assertEquals(2, later.first)
         assertEquals(280, later.second)
-        val kokoroLater = com.hana.reader.tts.HanaPlayer.chunkLimits(
-            "en", false, com.hana.reader.tts.NeuralKind.Kokoro
-        )
-        assertEquals(1 to 64, kokoroLater)
     }
 
     @Test

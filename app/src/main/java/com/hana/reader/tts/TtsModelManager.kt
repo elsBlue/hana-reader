@@ -61,6 +61,10 @@ class TtsModelManager(
     private val _downloadState = MutableStateFlow<TtsDownloadState>(TtsDownloadState.Idle)
     val downloadState: StateFlow<TtsDownloadState> = _downloadState.asStateFlow()
 
+    init {
+        purgeRetiredKokoro()
+    }
+
     fun isReady(language: String): Boolean {
         val pack = TtsPacks.forLanguage(language) ?: return false
         return readyMatches(language, pack) && findFiles(langDir(language), pack.kind) != null
@@ -212,6 +216,18 @@ class TtsModelManager(
 
     private fun langDir(language: String) = File(root, language)
 
+    /** Drop the old ~300 MB Kokoro folder so Listen does not keep dead weight. */
+    private fun purgeRetiredKokoro() {
+        val dir = File(root, TtsPacks.RETIRED_KOKORO_STORAGE_KEY)
+        val ready = File(dir, READY)
+        val marker = if (ready.isFile) ready.readText().trim() else ""
+        val looksRetired = marker.contains("kokoro") ||
+            dir.walkTopDown().any { it.isFile && it.name == "voices.bin" }
+        if (dir.isDirectory && looksRetired) {
+            dir.deleteRecursively()
+        }
+    }
+
     private fun download(url: String, dest: File, minBytes: Long, onProgress: (Float) -> Unit) {
         dest.parentFile?.mkdirs()
         val tmp = File(dest.parentFile, dest.name + ".part")
@@ -289,7 +305,6 @@ class TtsModelManager(
             val dataDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
                 ?: return null
             val voices = files.firstOrNull { it.name == "voices.bin" }
-            if (kind == NeuralKind.Kokoro && voices == null) return null
             return ModelFiles(kind, onnx, tokens, dataDir, voices)
         }
     }

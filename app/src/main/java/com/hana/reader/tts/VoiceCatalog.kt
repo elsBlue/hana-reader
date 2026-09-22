@@ -11,20 +11,15 @@ data class CatalogVoice(
 )
 
 object VoiceCatalog {
-    // Smooth first — continuous listen is the product default.
-    // Bella stays as the warmer Kokoro option (may pause on slower phones).
     val ENGLISH = listOf(
-        CatalogVoice("en_lessac", "en", 0, "lessac", "Smooth", "Recommended — starts sooner, fewer waits", TtsPacks.EN_SMOOTH.packId),
-        CatalogVoice("af_bella", "en", 1, "af_bella", "Bella", "Warmer Kokoro — may pause on this phone", TtsPacks.EN.packId),
-        CatalogVoice("af_nicole", "en", 2, "af_nicole", "Nicole", "Breathy / soft", TtsPacks.EN.packId),
-        CatalogVoice("af_sarah", "en", 3, "af_sarah", "Sarah", "Clear / neutral", TtsPacks.EN.packId),
-        CatalogVoice("af_sky", "en", 4, "af_sky", "Sky", "Bright / light", TtsPacks.EN.packId),
-        CatalogVoice("am_adam", "en", 5, "am_adam", "Adam", "American male", TtsPacks.EN.packId),
-        CatalogVoice("am_michael", "en", 6, "am_michael", "Michael", "Deep male", TtsPacks.EN.packId),
-        CatalogVoice("bf_emma", "en", 7, "bf_emma", "Emma", "British female", TtsPacks.EN.packId),
-        CatalogVoice("bf_isabella", "en", 8, "bf_isabella", "Isabella", "Soft British", TtsPacks.EN.packId),
-        CatalogVoice("bm_george", "en", 9, "bm_george", "George", "British male", TtsPacks.EN.packId),
-        CatalogVoice("bm_lewis", "en", 10, "bm_lewis", "Lewis", "Casual British male", TtsPacks.EN.packId),
+        CatalogVoice(
+            "en_lessac", "en", 0, "lessac", "Smooth",
+            "Clear audiobook — default listen", TtsPacks.EN_SMOOTH.packId
+        ),
+        CatalogVoice(
+            "en_amy", "en", 0, "amy", "Warm",
+            "Softer conversational — still continuous", TtsPacks.EN_WARM.packId
+        ),
     )
 
     val INDONESIAN = listOf(
