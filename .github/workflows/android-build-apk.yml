@@ -1,0 +1,105 @@
+name: Build APKs
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: Build signed release APK (requires RELEASE_* secrets)
+        type: boolean
+        default: false
+
+jobs:
+  debug:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.vfs.watch=false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+
+      - name: Cache debug keystore
+        id: cache-keystore
+        uses: actions/cache@v4
+        with:
+          path: debug.keystore
+          key: hana-debug-keystore
+
+      - name: Ensure debug keystore exists
+        if: steps.cache-keystore.outputs.cache-hit != 'true'
+        run: |
+          if [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Hana,C=US"
+          fi
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --no-daemon --max-workers=1
+
+      - name: Build Debug APK
+        run: gradle assembleDebug --no-daemon --max-workers=1
+
+      - name: Upload debug APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hana-reader-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  release:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.build_release
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.vfs.watch=false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > release.keystore
+
+      - name: Write keystore.properties
+        env:
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: printf "storeFile=release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Build Release APK
+        run: gradle assembleRelease --no-daemon --max-workers=1
+
+      - name: Upload release APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hana-reader-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
