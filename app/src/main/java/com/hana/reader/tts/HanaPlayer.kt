@@ -66,6 +66,8 @@ class HanaPlayer(context: Context) {
     @Volatile private var headKeySnapshot: String? = null
     /** Bumped when the queue is discarded so in-flight synth results are dropped. */
     private val synthEpoch = AtomicInteger(0)
+    /** True after the first samples of this Listen session were written. */
+    @Volatile private var storyStarted = false
 
     fun play(book: Book, chapterIndex: Int? = null, sentenceIndex: Int? = null) {
         val saved = store.get(book.id)
@@ -79,6 +81,7 @@ class HanaPlayer(context: Context) {
             playing = true,
             status = "Starting…"
         )
+        storyStarted = false
         persist()
         ReadingService.start(appContext)
         restartSpeak(prepare = true)
@@ -93,6 +96,7 @@ class HanaPlayer(context: Context) {
     fun pause() {
         speakJob?.cancel()
         speakJob = null
+        storyStarted = false
         clearReadyQueue()
         sentenceRemainder = null
         neural.stop()
@@ -375,6 +379,7 @@ class HanaPlayer(context: Context) {
                 null
             }
             _state.value = _state.value.copy(status = hint)
+            storyStarted = true
             kickQueueFill(book, sid, speed)
             withContext(Dispatchers.IO) { neural.writeStreaming(audio) }
             if (_state.value.playing) {
@@ -599,17 +604,24 @@ class HanaPlayer(context: Context) {
 
     private fun markNeuralReady() {
         val playing = _state.value.playing
-        val keepStatus = playing && (
-            _state.value.status?.contains("Starting", true) == true ||
-                _state.value.status?.contains("Getting first", true) == true ||
-                _state.value.status?.contains("Synthesizing", true) == true ||
-                _state.value.status?.contains("Preparing", true) == true
+        if (playing) {
+            val status = when {
+                _state.value.status?.startsWith("Downloading") == true -> "Starting…"
+                _state.value.status.isNullOrBlank() -> "Starting…"
+                else -> _state.value.status
+            }
+            _state.value = _state.value.copy(
+                usingNeural = true,
+                downloadProgress = null,
+                status = status
             )
-        _state.value = _state.value.copy(
-            usingNeural = true,
-            downloadProgress = null,
-            status = if (keepStatus) _state.value.status else "Neural voice ready"
-        )
+        } else {
+            _state.value = _state.value.copy(
+                usingNeural = true,
+                downloadProgress = null,
+                status = "Neural voice ready"
+            )
+        }
     }
 
     /**
@@ -772,22 +784,13 @@ class HanaPlayer(context: Context) {
         }
     }
 
-    private fun launchStatusTicker(isFirst: Boolean): Job {
-        val t0 = SystemClock.elapsedRealtime()
-        val base = if (isFirst) "Getting first line…" else "Preparing a few lines…"
-        _state.value = _state.value.copy(status = base)
-        return scope.launch {
-            var lastSec = -1
-            while (true) {
-                delay(STATUS_TICK_MS)
-                val sec = ((SystemClock.elapsedRealtime() - t0) / 1000L).toInt()
-                if (sec != lastSec) {
-                    lastSec = sec
-                    val label = if (sec <= 0) base else "$base ${sec}s"
-                    _state.value = _state.value.copy(status = label)
-                }
-            }
+    private fun launchStatusTicker(@Suppress("UNUSED_PARAMETER") isFirst: Boolean): Job {
+        // After speech has started, never flash another wait. Before that,
+        // keep the single "Starting…" from Listen tap — no second label, no timer.
+        if (!storyStarted && _state.value.status.isNullOrBlank()) {
+            _state.value = _state.value.copy(status = "Starting…")
         }
+        return Job().apply { complete() }
     }
 
     private fun sentences(book: Book, chapterIndex: Int): List<String> {
@@ -829,7 +832,6 @@ class HanaPlayer(context: Context) {
 
     companion object {
         private const val TAG = "HanaTts"
-        private const val STATUS_TICK_MS = 500L
         /** Lookahead depth: keep this many synthesized chunks ready ahead of play. */
         const val QUEUE_DEPTH = 4
         /** After a starve, fill aims to have this many extra chunks ready. */

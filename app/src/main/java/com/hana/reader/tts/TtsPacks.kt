@@ -68,7 +68,7 @@ object TtsPacks {
     }
 
     fun packsForLanguage(language: String): List<TtsPack> = when (language) {
-        "en" -> listOf(EN, EN_SMOOTH)
+        "en" -> listOf(EN_SMOOTH, EN)
         "id" -> listOf(ID)
         else -> emptyList()
     }

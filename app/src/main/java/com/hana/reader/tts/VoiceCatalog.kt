@@ -11,10 +11,11 @@ data class CatalogVoice(
 )
 
 object VoiceCatalog {
-    // Bella first (default). Blend/af sid0 removed — silent / unused in pack UX.
+    // Smooth first — continuous listen is the product default.
+    // Bella stays as the warmer Kokoro option (may pause on slower phones).
     val ENGLISH = listOf(
-        CatalogVoice("af_bella", "en", 1, "af_bella", "Bella", "Warm narration — Hana default", TtsPacks.EN.packId),
-        CatalogVoice("en_lessac", "en", 0, "lessac", "Smooth", "Faster listen — fewer waits (Piper)", TtsPacks.EN_SMOOTH.packId),
+        CatalogVoice("en_lessac", "en", 0, "lessac", "Smooth", "Recommended — starts sooner, fewer waits", TtsPacks.EN_SMOOTH.packId),
+        CatalogVoice("af_bella", "en", 1, "af_bella", "Bella", "Warmer Kokoro — may pause on this phone", TtsPacks.EN.packId),
         CatalogVoice("af_nicole", "en", 2, "af_nicole", "Nicole", "Breathy / soft", TtsPacks.EN.packId),
         CatalogVoice("af_sarah", "en", 3, "af_sarah", "Sarah", "Clear / neutral", TtsPacks.EN.packId),
         CatalogVoice("af_sky", "en", 4, "af_sky", "Sky", "Bright / light", TtsPacks.EN.packId),

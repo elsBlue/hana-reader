@@ -90,7 +90,7 @@ class TtsPacksTest {
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
         assertEquals(TtsPacks.EN, TtsPacks.packForVoice("af_bella"))
         assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_news"))
-        assertEquals(listOf(TtsPacks.EN, TtsPacks.EN_SMOOTH), TtsPacks.packsForLanguage("en"))
+        assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN), TtsPacks.packsForLanguage("en"))
         val caption = TtsPacks.playerCaption(
             "en",
             VoiceProfile.Hana,

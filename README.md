@@ -7,8 +7,8 @@ A calm Android ebook reader that reads to you in a warm female voice. Built for 
 - Minimal library + reader
 - **Listen like music**: lock the phone, Hana keeps reading from a notification
 - **Offline neural voices** after one download per language
-  - English **Hana**: **Kokoro-82M fp32** (`af_bella`) — warmer, can be slow on some phones
-  - English **Smooth**: **Piper** `en_US-lessac-medium` — faster continuous listen
+  - English **Smooth** (default Listen): **Piper** `en_US-lessac-medium` — starts sooner, fewer waits
+  - English **Bella**: **Kokoro-82M fp32** (`af_bella`) — warmer, may pause on some phones
   - Indonesian: **Piper** `id_ID-news_tts-medium`
 - Falls back to the device TTS voice if the neural pack is missing
 - Google sign-in + local progress saving
@@ -37,7 +37,7 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 ## Voice
 
-Tap **Listen**. The first English book downloads the Kokoro pack (~300 MB) into app storage. On Voices you can also download **Smooth** (~67 MB) for fewer gaps. The first Indonesian book downloads Piper (~64 MB). After that, listening works in airplane mode.
+Tap **Listen**. The first English book downloads **Smooth** (~67 MB). Bella/Kokoro (~300 MB) is optional in Voices if you want the warmer voice. The first Indonesian book downloads Piper (~64 MB). After that, listening works in airplane mode.
 
 Tap the caption on the mini player to switch **Hana · neural** (Kokoro/Piper) and **Device** (system TTS).
 
