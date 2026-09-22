@@ -232,7 +232,7 @@ fun VoicesScreen(nav: NavHostController) {
         Spacer(Modifier.height(12.dp))
 
         LazyColumn(
-            contentPadding = PaddingValues(horizontal = 20.dp, bottom = 48.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.weight(1f)
         ) {
