@@ -61,7 +61,7 @@ class NeuralTtsEngine {
         }
         val gen = GenerationConfig(
             sid = sid,
-            speed = speed.coerceIn(0.7f, 1.4f),
+            speed = speed.coerceIn(0.7f, 1.15f),
             silenceScale = TtsPacks.SILENCE_SCALE
         )
         val audio = synchronized(lock) {
@@ -80,11 +80,27 @@ class NeuralTtsEngine {
     fun writeStreaming(pcm: PcmAudio) {
         val gen = streamGen.get()
         val created = synchronized(lock) { ensureTrack(pcm.sampleRate) }
+        val samples = toPcm16(pcm.samples)
         var offset = 0
-        val samples = pcm.samples
         while (offset < samples.size && streamGen.get() == gen) {
             val n = (samples.size - offset).coerceAtMost((pcm.sampleRate / 4).coerceAtLeast(512))
             val written = created.write(samples, offset, n, AudioTrack.WRITE_BLOCKING)
+            if (written <= 0) break
+            offset += written
+        }
+    }
+
+    /** Insert a short pause so commas and sentence endings are actually heard. */
+    fun writeSilence(sampleRate: Int, durationMs: Int) {
+        if (durationMs <= 0 || sampleRate <= 0) return
+        val gen = streamGen.get()
+        val created = synchronized(lock) { ensureTrack(sampleRate) }
+        val n = ((sampleRate.toLong() * durationMs) / 1000L).toInt().coerceAtLeast(1)
+        val zeros = ShortArray(n)
+        var offset = 0
+        while (offset < zeros.size && streamGen.get() == gen) {
+            val chunk = (zeros.size - offset).coerceAtMost((sampleRate / 4).coerceAtLeast(512))
+            val written = created.write(zeros, offset, chunk, AudioTrack.WRITE_BLOCKING)
             if (written <= 0) break
             offset += written
         }
@@ -154,15 +170,15 @@ class NeuralTtsEngine {
         val minBuf = AudioTrack.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_FLOAT
-        ).coerceAtLeast(sampleRate * 16)
+            AudioFormat.ENCODING_PCM_16BIT
+        ).coerceAtLeast(sampleRate * 4)
         val created = AudioTrack(
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build(),
             AudioFormat.Builder()
-                .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setSampleRate(sampleRate)
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                 .build(),
@@ -224,9 +240,24 @@ class NeuralTtsEngine {
             if (a > peak) peak = a
         }
         if (peak <= 1.0f || peak < 1e-4f) return samples
-        val scale = 0.95f / peak
+        val scale = 0.92f / peak
         val out = FloatArray(samples.size)
         for (i in samples.indices) out[i] = samples[i] * scale
+        return out
+    }
+
+    /** 16-bit with a 3ms edge fade — float PCM buzzes like a broken radio on many phones. */
+    private fun toPcm16(samples: FloatArray): ShortArray {
+        val n = samples.size
+        val out = ShortArray(n)
+        val fade = 64
+        for (i in 0 until n) {
+            var s = samples[i].coerceIn(-1f, 1f)
+            if (i < fade) s *= i.toFloat() / fade
+            val tail = n - 1 - i
+            if (tail < fade) s *= tail.toFloat() / fade
+            out[i] = (s * 32767f).toInt().coerceIn(-32767, 32767).toShort()
+        }
         return out
     }
 
@@ -237,13 +268,15 @@ class NeuralTtsEngine {
                     model = files.onnx.absolutePath,
                     tokens = files.tokens.absolutePath,
                     dataDir = files.dataDir.absolutePath,
-                    lengthScale = 1.0f
+                    noiseScale = TtsPacks.NOISE_SCALE,
+                    noiseScaleW = TtsPacks.NOISE_SCALE_W,
+                    lengthScale = TtsPacks.LENGTH_SCALE
                 ),
-                numThreads = 2,
+                numThreads = 1,
                 debug = false,
                 provider = "cpu"
             ),
-            maxNumSentences = 4,
+            maxNumSentences = 2,
             silenceScale = TtsPacks.SILENCE_SCALE
         )
     }

@@ -100,7 +100,7 @@ fun VoicesScreen(nav: NavHostController) {
                 refresh()
                 status = "Ready"
                 val lang = TtsPacks.forLanguage(d.language)?.language ?: d.language
-                player.warmPrepare(lang)
+                runCatching { player.warmPrepare(lang) }
             }
             is TtsDownloadState.Failed -> {
                 status = d.message
@@ -138,7 +138,7 @@ fun VoicesScreen(nav: NavHostController) {
         }
 
         Text(
-            "Smooth is the default English listen. Warm is a softer voice that still keeps up.",
+            "Smooth is slower now so you can follow. Warm keeps the commas. Indonesian too.",
             color = Muted,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
@@ -165,45 +165,43 @@ fun VoicesScreen(nav: NavHostController) {
             }
         }
 
-        packs.forEach { pack ->
-            val key = pack.storageKey
-            val downloadingThis = download is TtsDownloadState.Downloading &&
-                (download as TtsDownloadState.Downloading).language == key
-            val downloadProgress = (download as? TtsDownloadState.Downloading)
-                ?.takeIf { it.language == key }?.progress ?: 0f
-            val downloadStage = (download as? TtsDownloadState.Downloading)
-                ?.takeIf { it.language == key }?.stage
-            val failedMsg = (download as? TtsDownloadState.Failed)
-                ?.takeIf { it.language == key }?.message
-            PackCard(
-                pack = pack,
-                ready = key in readyKeys,
-                bytes = bytesByKey[key] ?: 0L,
-                incomplete = key in incompleteKeys,
-                downloading = downloadingThis,
-                progress = downloadProgress,
-                stage = downloadStage,
-                failedMsg = failedMsg,
-                onDownload = {
-                    if (downloadingThis) return@PackCard
-                    status = "Connecting…"
-                    models.startDownload(key)
-                },
-                onRemove = {
-                    models.deletePack(key)
-                    if (neural.isLoadedPack(pack.packId)) neural.release()
-                    status = "${pack.displayName} removed"
-                    refresh()
-                }
-            )
-            Spacer(Modifier.height(10.dp))
-        }
-
         LazyColumn(
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 48.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.weight(1f)
         ) {
+            items(packs, key = { it.storageKey }) { pack ->
+                val key = pack.storageKey
+                val downloadingThis = download is TtsDownloadState.Downloading &&
+                    (download as TtsDownloadState.Downloading).language == key
+                val downloadProgress = (download as? TtsDownloadState.Downloading)
+                    ?.takeIf { it.language == key }?.progress ?: 0f
+                val downloadStage = (download as? TtsDownloadState.Downloading)
+                    ?.takeIf { it.language == key }?.stage
+                val failedMsg = (download as? TtsDownloadState.Failed)
+                    ?.takeIf { it.language == key }?.message
+                PackCard(
+                    pack = pack,
+                    ready = key in readyKeys,
+                    bytes = bytesByKey[key] ?: 0L,
+                    incomplete = key in incompleteKeys,
+                    downloading = downloadingThis,
+                    progress = downloadProgress,
+                    stage = downloadStage,
+                    failedMsg = failedMsg,
+                    onDownload = {
+                        if (downloadingThis) return@PackCard
+                        status = "Connecting…"
+                        models.startDownload(key)
+                    },
+                    onRemove = {
+                        models.deletePack(key)
+                        if (neural.isLoadedPack(pack.packId)) neural.release()
+                        status = "${pack.displayName} removed"
+                        refresh()
+                    }
+                )
+            }
             item {
                 Text(
                     "VOICES",
@@ -211,7 +209,7 @@ fun VoicesScreen(nav: NavHostController) {
                     fontSize = 11.sp,
                     letterSpacing = 1.6.sp,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
                 )
             }
             items(voices, key = { it.id }) { voice ->
@@ -283,14 +281,12 @@ private fun PackCard(
     onRemove: () -> Unit
 ) {
     val blurb = when (pack.packId) {
-        TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · default listen"
-        TtsPacks.EN_WARM.packId -> "Piper Amy · ~64 MB · softer, still continuous"
-        else -> "Piper news · ~63 MB · offline after download"
+        TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · slower, with pauses"
+        TtsPacks.EN_WARM.packId -> "Piper Amy · ~64 MB · softer, commas kept"
+        else -> "Piper news · ~63 MB · slower, with pauses"
     }
     Surface(
-        modifier = Modifier
-            .padding(horizontal = 20.dp)
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         color = PaperElevated,
         shape = RoundedCornerShape(20.dp),
         shadowElevation = 1.dp

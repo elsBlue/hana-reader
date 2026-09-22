@@ -14,16 +14,16 @@ object VoiceCatalog {
     val ENGLISH = listOf(
         CatalogVoice(
             "en_lessac", "en", 0, "lessac", "Smooth",
-            "Clear audiobook — default listen", TtsPacks.EN_SMOOTH.packId
+            "Clear audiobook — slower, with pauses", TtsPacks.EN_SMOOTH.packId
         ),
         CatalogVoice(
             "en_amy", "en", 0, "amy", "Warm",
-            "Softer conversational — still continuous", TtsPacks.EN_WARM.packId
+            "Softer voice — commas and sentence space kept", TtsPacks.EN_WARM.packId
         ),
     )
 
     val INDONESIAN = listOf(
-        CatalogVoice("id_news", "id", 0, "news", "News", "Clear offline Piper (news style)", TtsPacks.ID.packId),
+        CatalogVoice("id_news", "id", 0, "news", "News", "Slower offline Piper, with pauses", TtsPacks.ID.packId),
     )
 
     fun all(): List<CatalogVoice> = ENGLISH + INDONESIAN

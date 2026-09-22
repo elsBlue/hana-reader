@@ -7,9 +7,9 @@ A calm Android ebook reader that reads to you in a warm female voice. Built for 
 - Minimal library + reader
 - **Listen like music**: lock the phone, Hana keeps reading from a notification
 - **Offline neural voices** after one download per language
-  - English **Smooth** (default Listen): **Piper** `en_US-lessac-medium` — clear audiobook
-  - English **Warm**: **Piper** `en_US-amy-medium` — softer conversational, still continuous
-  - Indonesian: **Piper** `id_ID-news_tts-medium`
+  - English **Smooth** (default Listen): **Piper** `en_US-lessac-medium` — slower, with pauses
+  - English **Warm**: **Piper** `en_US-amy-medium` — softer, commas kept
+  - Indonesian: **Piper** `id_ID-news_tts-medium` — slower, with pauses
 - Falls back to the device TTS voice if the neural pack is missing
 - Google sign-in + local progress saving
 - Import `.epub`, `.txt`, or Markdown
@@ -39,9 +39,11 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 Tap **Listen**. The first English book downloads **Smooth** (~67 MB). **Warm** (~64 MB) is optional in Voices if you want a softer voice. The first Indonesian book downloads Piper (~64 MB). After that, listening works in airplane mode.
 
+Listen is slower than 1.4.3 on purpose: commas and sentence gaps are kept, and Smooth is no longer a rush.
+
 Tap the caption on the mini player to switch **Hana · neural** (Piper) and **Device** (system TTS).
 
-The web preview uses Kokoro in the browser. This Android app uses sherpa-onnx so playback still works with the screen locked.
+The web preview uses the browser voice. This Android app uses sherpa-onnx so playback still works with the screen locked.
 
 See `NOTICE` for licenses and download URLs.
 
