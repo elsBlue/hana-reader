@@ -169,8 +169,8 @@ object TextUtil {
         val t = text.trimEnd()
         if (t.isEmpty()) return 0
         return when (t.last()) {
-            '.', '!', '?', '…' -> 320
-            ',', ';', ':' -> 140
+            '.', '!', '?', '…' -> 400
+            ',', ';', ':' -> 180
             else -> 40
         }
     }
