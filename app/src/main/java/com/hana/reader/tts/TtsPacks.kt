@@ -11,6 +11,7 @@ data class TtsPack(
     /** Bump to force re-download when pack quality defaults change. */
     val packId: String,
     val displayName: String,
+    val storageKey: String,
 )
 
 object TtsPacks {
@@ -32,7 +33,20 @@ object TtsPacks {
         archiveName = "kokoro-en-v0_19.tar.bz2",
         minArchiveBytes = 200L * 1024 * 1024,
         packId = "kokoro-en-v0_19-fp32",
-        displayName = "Kokoro"
+        displayName = "Kokoro",
+        storageKey = "en"
+    )
+
+    /** Faster English neural for continuous listen when Kokoro RTF cannot keep up. */
+    val EN_SMOOTH = TtsPack(
+        language = "en",
+        kind = NeuralKind.Piper,
+        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2",
+        archiveName = "vits-piper-en_US-lessac-medium.tar.bz2",
+        minArchiveBytes = 40L * 1024 * 1024,
+        packId = "piper-en-lessac-medium",
+        displayName = "Smooth",
+        storageKey = "en-smooth"
     )
 
     val ID = TtsPack(
@@ -42,14 +56,30 @@ object TtsPacks {
         archiveName = "vits-piper-id_ID-news_tts-medium.tar.bz2",
         minArchiveBytes = 40L * 1024 * 1024,
         packId = "piper-id-news-medium",
-        displayName = "Piper"
+        displayName = "Piper",
+        storageKey = "id"
     )
 
     fun forLanguage(language: String): TtsPack? = when (language) {
         "en" -> EN
         "id" -> ID
+        "en-smooth" -> EN_SMOOTH
         else -> null
     }
+
+    fun packsForLanguage(language: String): List<TtsPack> = when (language) {
+        "en" -> listOf(EN, EN_SMOOTH)
+        "id" -> listOf(ID)
+        else -> emptyList()
+    }
+
+    fun packById(packId: String): TtsPack? = listOf(EN, EN_SMOOTH, ID).firstOrNull { it.packId == packId }
+
+    fun packForVoice(voiceId: String?): TtsPack? {
+        val voice = voiceId?.let { VoiceCatalog.find(it) } ?: return null
+        return packById(voice.packId) ?: forLanguage(voice.language)
+    }
+
 
     fun speakerId(language: String, profile: VoiceProfile, selectedSid: Int? = null): Int {
         if (profile != VoiceProfile.Hana) {
@@ -74,7 +104,8 @@ object TtsPacks {
         usingNeural: Boolean,
         downloading: Boolean,
         status: String?,
-        selectedVoiceName: String? = null
+        selectedVoiceName: String? = null,
+        selectedVoiceId: String? = null
     ): String {
         if (downloading) return status ?: "Downloading voice…"
         // Surface prepare/synth wait so Listen does not look frozen.
@@ -89,10 +120,11 @@ object TtsPacks {
         }
         return when {
             profile == VoiceProfile.Hana && usingNeural -> {
-                val pack = forLanguage(language)
+                val voice = VoiceCatalog.find(selectedVoiceId.orEmpty())
+                val pack = voice?.let { packById(it.packId) } ?: forLanguage(language)
                 val engine = pack?.displayName ?: "Neural"
-                val voice = selectedVoiceName ?: voiceName(language, profile)
-                "$engine · $voice · tap = system"
+                val name = selectedVoiceName ?: voiceName(language, profile)
+                "$engine · $name · tap = system"
             }
             profile == VoiceProfile.Hana && !usingNeural -> {
                 val why = status?.takeIf {

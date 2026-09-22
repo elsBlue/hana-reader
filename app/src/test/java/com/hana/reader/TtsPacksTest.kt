@@ -63,11 +63,40 @@ class TtsPacksTest {
             "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Getting first line… 2s"
         )
         assertEquals("Getting first line… 2s", firstLine)
+        val preparing = TtsPacks.playerCaption(
+            "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Preparing a few lines… 3s"
+        )
+        assertEquals("Preparing a few lines… 3s", preparing)
     }
 
     @Test
     fun unknownLanguageHasNoPack() {
         assertNull(TtsPacks.forLanguage("ja"))
+    }
+
+    @Test
+    fun smoothEnglishIsPiperLessac() {
+        val pack = TtsPacks.forLanguage("en-smooth")!!
+        assertEquals(NeuralKind.Piper, pack.kind)
+        assertEquals("en-smooth", pack.storageKey)
+        assertEquals("piper-en-lessac-medium", pack.packId)
+        assertTrue(pack.url.contains("en_US-lessac-medium"))
+        assertFalse(pack.url.contains("int8"))
+        assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
+        assertEquals(TtsPacks.EN, TtsPacks.packForVoice("af_bella"))
+        assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_news"))
+        assertEquals(listOf(TtsPacks.EN, TtsPacks.EN_SMOOTH), TtsPacks.packsForLanguage("en"))
+        val caption = TtsPacks.playerCaption(
+            "en",
+            VoiceProfile.Hana,
+            usingNeural = true,
+            downloading = false,
+            status = null,
+            selectedVoiceName = "lessac",
+            selectedVoiceId = "en_lessac"
+        )
+        assertTrue(caption.contains("Smooth"))
+        assertTrue(caption.contains("lessac"))
     }
 
     @Test

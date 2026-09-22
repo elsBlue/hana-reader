@@ -15,8 +15,9 @@ class VoiceCatalogTest {
         assertEquals("af_bella", en.first().id)
         assertEquals(TtsPacks.KOKORO_HANA_SID, en.first().sid)
         assertNull(VoiceCatalog.find("af"))
-        assertFalse(en.any { it.id == "af" || it.sid == 0 })
+        assertFalse(en.any { it.id == "af" })
         assertTrue(en.any { it.id == "af_bella" })
+        assertTrue(en.any { it.id == "en_lessac" && it.packId == TtsPacks.EN_SMOOTH.packId })
     }
 
     @Test

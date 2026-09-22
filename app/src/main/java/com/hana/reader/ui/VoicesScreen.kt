@@ -53,6 +53,7 @@ import androidx.navigation.NavHostController
 import com.hana.reader.tts.CatalogVoice
 import com.hana.reader.tts.HanaPlayer
 import com.hana.reader.tts.TtsDownloadState
+import com.hana.reader.tts.TtsPack
 import com.hana.reader.tts.TtsPacks
 import com.hana.reader.tts.VoiceCatalog
 import com.hana.reader.tts.VoiceProfile
@@ -71,26 +72,23 @@ fun VoicesScreen(nav: NavHostController) {
 
     var langTab by remember { mutableStateOf("en") }
     var selectedId by remember { mutableStateOf(prefs.selectedVoiceId(langTab)) }
-    var enReady by remember { mutableStateOf(models.isReady("en")) }
-    var idReady by remember { mutableStateOf(models.isReady("id")) }
-    var enBytes by remember { mutableStateOf(models.installedBytes("en")) }
-    var idBytes by remember { mutableStateOf(models.installedBytes("id")) }
-    var enIncomplete by remember { mutableStateOf(models.isIncomplete("en")) }
-    var idIncomplete by remember { mutableStateOf(models.isIncomplete("id")) }
+    var readyKeys by remember { mutableStateOf(emptySet<String>()) }
+    var bytesByKey by remember { mutableStateOf(emptyMap<String, Long>()) }
+    var incompleteKeys by remember { mutableStateOf(emptySet<String>()) }
     var status by remember { mutableStateOf<String?>(null) }
     var previewing by remember { mutableStateOf(false) }
 
     val download by models.downloadState.collectAsState()
 
     fun refresh() {
-        enReady = models.isReady("en")
-        idReady = models.isReady("id")
-        enBytes = models.installedBytes("en")
-        idBytes = models.installedBytes("id")
-        enIncomplete = models.isIncomplete("en")
-        idIncomplete = models.isIncomplete("id")
+        val keys = listOf("en", "en-smooth", "id")
+        readyKeys = keys.filter { models.isReady(it) }.toSet()
+        bytesByKey = keys.associateWith { models.installedBytes(it) }
+        incompleteKeys = keys.filter { models.isIncomplete(it) }.toSet()
         selectedId = prefs.selectedVoiceId(langTab)
     }
+
+    LaunchedEffect(Unit) { refresh() }
 
     LaunchedEffect(langTab) {
         selectedId = prefs.selectedVoiceId(langTab)
@@ -101,34 +99,22 @@ fun VoicesScreen(nav: NavHostController) {
             is TtsDownloadState.Ready -> {
                 refresh()
                 status = "Ready"
-                // Warm-load neural so first Listen is not a cold prepare.
-                player.warmPrepare(d.language)
+                val lang = TtsPacks.forLanguage(d.language)?.language ?: d.language
+                player.warmPrepare(lang)
             }
             is TtsDownloadState.Failed -> {
-                if (d.language == langTab) status = d.message
+                status = d.message
                 refresh()
             }
             is TtsDownloadState.Downloading -> {
-                if (d.language == langTab) status = d.stage
+                status = d.stage
             }
             else -> Unit
         }
     }
 
-    val pack = TtsPacks.forLanguage(langTab)!!
-    val packReady = if (langTab == "en") enReady else idReady
-    val packBytes = if (langTab == "en") enBytes else idBytes
-    val packIncomplete = if (langTab == "en") enIncomplete else idIncomplete
+    val packs = TtsPacks.packsForLanguage(langTab)
     val voices = VoiceCatalog.forLanguage(langTab)
-
-    val downloadingThis = download is TtsDownloadState.Downloading &&
-        (download as TtsDownloadState.Downloading).language == langTab
-    val downloadProgress = (download as? TtsDownloadState.Downloading)
-        ?.takeIf { it.language == langTab }?.progress ?: 0f
-    val downloadStage = (download as? TtsDownloadState.Downloading)
-        ?.takeIf { it.language == langTab }?.stage
-    val failedThis = download as? TtsDownloadState.Failed
-    val failedMsg = failedThis?.takeIf { it.language == langTab }?.message
 
     Column(
         Modifier
@@ -152,14 +138,14 @@ fun VoicesScreen(nav: NavHostController) {
         }
 
         Text(
-            "Download a pack once, then pick a voice. Tap a row to make it active.",
+            "Download a pack once, then pick a voice. Smooth is the continuous English listen when Kokoro feels slow.",
             color = Muted,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
         )
 
         Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-            listOf("en" to "English · Kokoro", "id" to "Indonesia · Piper").forEach { (key, label) ->
+            listOf("en" to "English", "id" to "Indonesia").forEach { (key, label) ->
                 val on = langTab == key
                 Text(
                     label,
@@ -179,101 +165,39 @@ fun VoicesScreen(nav: NavHostController) {
             }
         }
 
-        Surface(
-            modifier = Modifier
-                .padding(horizontal = 20.dp)
-                .fillMaxWidth(),
-            color = PaperElevated,
-            shape = RoundedCornerShape(20.dp),
-            shadowElevation = 1.dp
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(pack.displayName, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = Ink)
-                Text(
-                    if (langTab == "en") "Kokoro fp32 · ~300 MB · offline after download"
-                    else "Piper news · ~63 MB · offline after download",
-                    color = Muted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-                Text(
-                    when {
-                        packReady -> "Installed · ${formatMb(packBytes)}"
-                        packIncomplete && !downloadingThis -> "Incomplete — tap to retry"
-                        else -> "Not downloaded"
-                    },
-                    color = when {
-                        packReady -> Rose
-                        packIncomplete -> Rose
-                        else -> Muted
-                    },
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-                if (downloadingThis) {
-                    LinearProgressIndicator(
-                        progress = { downloadProgress },
-                        modifier = Modifier
-                            .padding(top = 10.dp)
-                            .fillMaxWidth(),
-                        color = Rose,
-                        trackColor = Subtle
-                    )
-                    Text(
-                        downloadStage ?: status ?: "Downloading…",
-                        color = Muted,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 6.dp)
-                    )
-                } else if (failedMsg != null) {
-                    Text(
-                        "Failed: $failedMsg",
-                        color = Rose,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+        packs.forEach { pack ->
+            val key = pack.storageKey
+            val downloadingThis = download is TtsDownloadState.Downloading &&
+                (download as TtsDownloadState.Downloading).language == key
+            val downloadProgress = (download as? TtsDownloadState.Downloading)
+                ?.takeIf { it.language == key }?.progress ?: 0f
+            val downloadStage = (download as? TtsDownloadState.Downloading)
+                ?.takeIf { it.language == key }?.stage
+            val failedMsg = (download as? TtsDownloadState.Failed)
+                ?.takeIf { it.language == key }?.message
+            PackCard(
+                pack = pack,
+                ready = key in readyKeys,
+                bytes = bytesByKey[key] ?: 0L,
+                incomplete = key in incompleteKeys,
+                downloading = downloadingThis,
+                progress = downloadProgress,
+                stage = downloadStage,
+                failedMsg = failedMsg,
+                onDownload = {
+                    if (downloadingThis) return@PackCard
+                    status = "Connecting…"
+                    models.startDownload(key)
+                },
+                onRemove = {
+                    models.deletePack(key)
+                    if (neural.isLoadedPack(pack.packId)) neural.release()
+                    status = "${pack.displayName} removed"
+                    refresh()
                 }
-                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!packReady) {
-                        Button(
-                            onClick = {
-                                if (downloadingThis) return@Button
-                                status = "Connecting…"
-                                models.startDownload(langTab)
-                            },
-                            enabled = !downloadingThis,
-                            colors = ButtonDefaults.buttonColors(containerColor = Rose),
-                            shape = CircleShape,
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
-                        ) {
-                            Icon(Icons.Default.CloudDownload, null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                when {
-                                    downloadingThis -> "Downloading…"
-                                    failedMsg != null || packIncomplete -> "Retry"
-                                    else -> "Download pack"
-                                }
-                            )
-                        }
-                    } else {
-                        TextButton(onClick = {
-                            models.deletePack(langTab)
-                            neural.release()
-                            status = "Pack removed"
-                            refresh()
-                        }) {
-                            Icon(Icons.Default.Delete, null, Modifier.size(16.dp), tint = Muted)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Remove", color = Muted)
-                        }
-                    }
-                }
-            }
+            )
+            Spacer(Modifier.height(10.dp))
         }
-
-        Spacer(Modifier.height(12.dp))
 
         LazyColumn(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 48.dp),
@@ -282,7 +206,7 @@ fun VoicesScreen(nav: NavHostController) {
         ) {
             item {
                 Text(
-                    "VOICES IN THIS PACK",
+                    "VOICES",
                     color = Muted,
                     fontSize = 11.sp,
                     letterSpacing = 1.6.sp,
@@ -291,36 +215,49 @@ fun VoicesScreen(nav: NavHostController) {
                 )
             }
             items(voices, key = { it.id }) { voice ->
+                val pack = TtsPacks.packById(voice.packId)
+                val packKey = pack?.storageKey
+                val packReady = packKey != null && packKey in readyKeys
                 VoiceRow(
                     voice = voice,
                     selected = voice.id == selectedId,
                     packReady = packReady,
+                    packLabel = pack?.displayName,
                     previewBusy = previewing,
                     onSelect = {
                         prefs.setSelectedVoiceId(langTab, voice.id)
                         selectedId = voice.id
                         player.setProfile(VoiceProfile.Hana)
                         status = "Selected ${voice.label}"
+                        if (!packReady && packKey != null) {
+                            models.startDownload(packKey)
+                        }
                     },
                     onPreview = {
-                        if (!packReady || previewing) return@VoiceRow
+                        if (!packReady || previewing || pack == null || packKey == null) return@VoiceRow
                         previewing = true
                         scope.launch {
                             runCatching {
                                 withContext(Dispatchers.Default) {
-                                    val files = models.files(langTab)
-                                        ?: models.ensure(langTab) {}
-                                    if (!neural.isLoaded(langTab)) neural.prepare(langTab, files)
-                                    val sample = if (langTab == "id") {
+                                    val files = models.files(packKey)
+                                        ?: models.ensure(packKey) {}
+                                    if (!neural.isLoadedPack(pack.packId)) {
+                                        neural.prepare(voice.language, files, pack.packId)
+                                    }
+                                    val sample = if (voice.language == "id") {
                                         "Halo. Ini suara Hana untuk membaca buku secara offline."
                                     } else {
                                         "Hello. This is Hana, reading softly so long books feel easy."
                                     }
-                                    val pcm = neural.synthesize(sample, langTab, voice.sid, TtsPacks.DEFAULT_RATE)
+                                    val pcm = neural.synthesize(
+                                        sample,
+                                        voice.language,
+                                        voice.sid,
+                                        TtsPacks.DEFAULT_RATE
+                                    )
                                     neural.play(pcm)
                                 }
                             }.onFailure {
-                                // Keep showing status so the user sees why preview failed.
                                 status = it.message ?: "Preview failed"
                             }
                             previewing = false
@@ -333,10 +270,114 @@ fun VoicesScreen(nav: NavHostController) {
 }
 
 @Composable
+private fun PackCard(
+    pack: TtsPack,
+    ready: Boolean,
+    bytes: Long,
+    incomplete: Boolean,
+    downloading: Boolean,
+    progress: Float,
+    stage: String?,
+    failedMsg: String?,
+    onDownload: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val blurb = when (pack.packId) {
+        TtsPacks.EN.packId -> "Kokoro fp32 · ~300 MB · warmer voice, slower on some phones"
+        TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · continuous listen, fewer gaps"
+        else -> "Piper news · ~63 MB · offline after download"
+    }
+    Surface(
+        modifier = Modifier
+            .padding(horizontal = 20.dp)
+            .fillMaxWidth(),
+        color = PaperElevated,
+        shape = RoundedCornerShape(20.dp),
+        shadowElevation = 1.dp
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(pack.displayName, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = Ink)
+            Text(
+                blurb,
+                color = Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+            Text(
+                when {
+                    ready -> "Installed · ${formatMb(bytes)}"
+                    incomplete && !downloading -> "Incomplete — tap to retry"
+                    else -> "Not downloaded"
+                },
+                color = when {
+                    ready -> Rose
+                    incomplete -> Rose
+                    else -> Muted
+                },
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            if (downloading) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .padding(top = 10.dp)
+                        .fillMaxWidth(),
+                    color = Rose,
+                    trackColor = Subtle
+                )
+                Text(
+                    stage ?: "Downloading…",
+                    color = Muted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            } else if (failedMsg != null) {
+                Text(
+                    "Failed: $failedMsg",
+                    color = Rose,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!ready) {
+                    Button(
+                        onClick = onDownload,
+                        enabled = !downloading,
+                        colors = ButtonDefaults.buttonColors(containerColor = Rose),
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.CloudDownload, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            when {
+                                downloading -> "Downloading…"
+                                failedMsg != null || incomplete -> "Retry"
+                                else -> "Download pack"
+                            }
+                        )
+                    }
+                } else {
+                    TextButton(onClick = onRemove) {
+                        Icon(Icons.Default.Delete, null, Modifier.size(16.dp), tint = Muted)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Remove", color = Muted)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun VoiceRow(
     voice: CatalogVoice,
     selected: Boolean,
     packReady: Boolean,
+    packLabel: String?,
     previewBusy: Boolean,
     onSelect: () -> Unit,
     onPreview: () -> Unit
@@ -363,11 +404,29 @@ private fun VoiceRow(
                     Text(voice.label, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = Ink)
                     if (selected) {
                         Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Default.Check, null, tint = Rose, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = Rose)
                     }
                 }
-                Text(voice.name, color = Muted, fontSize = 11.sp)
+                Text(
+                    buildString {
+                        append(voice.name)
+                        if (!packLabel.isNullOrBlank()) {
+                            append(" · ")
+                            append(packLabel)
+                        }
+                    },
+                    color = Muted,
+                    fontSize = 11.sp
+                )
                 Text(voice.traits, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                if (!packReady) {
+                    Text(
+                        "Download ${packLabel ?: "pack"} to use this voice",
+                        color = Rose,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
             IconButton(
                 onClick = onPreview,

@@ -57,6 +57,8 @@ class HanaPlayer(context: Context) {
     private var firstChunkAfterRestart = true
     /** Leftover of a hard-capped sentence; spoken before advancing sentenceIndex. */
     private var sentenceRemainder: String? = null
+    /** Pack that produced the current lookahead queue — drop queue on voice/pack change. */
+    private var queuePackId: String? = null
 
     fun play(book: Book, chapterIndex: Int? = null, sentenceIndex: Int? = null) {
         val saved = store.get(book.id)
@@ -174,7 +176,7 @@ class HanaPlayer(context: Context) {
         scope.launch {
             prepareNeuralIfNeeded(language)
             val target = book ?: _state.value.book
-            if (target != null && target.language == language && neural.isLoaded(language)) {
+            if (target != null && target.language == language && neural.isLoadedPack(activePack(language).packId)) {
                 val saved = store.get(target.id)
                 val snap = _state.value
                 val ch = if (snap.book?.id == target.id) {
@@ -204,7 +206,9 @@ class HanaPlayer(context: Context) {
         // (warmPrepare / Reader open prebuffer). Drop on seek / mismatch.
         // Intentionally stop audio here; normal chunk advance must NOT call stop().
         val bookNow = _state.value.book
-        val keep = bookNow != null && queueHeadMatchesFirst(bookNow)
+        val keep = bookNow != null &&
+            queueHeadMatchesFirst(bookNow) &&
+            queuePackId == activePack(bookNow.language).packId
         if (!keep) {
             clearReadyQueue()
         } else {
@@ -218,7 +222,7 @@ class HanaPlayer(context: Context) {
         speakJob = scope.launch {
             val book = _state.value.book ?: return@launch
             if (prepare) {
-                if (!neural.isLoaded(book.language) && _state.value.profile == VoiceProfile.Hana) {
+                if (!neural.isLoadedPack(activePack(book.language).packId) && _state.value.profile == VoiceProfile.Hana) {
                     if (_state.value.status == null || _state.value.status == "Starting…") {
                         _state.value = _state.value.copy(status = "Preparing voice…")
                     }
@@ -229,37 +233,47 @@ class HanaPlayer(context: Context) {
         }
     }
 
+    private fun activePack(language: String): TtsPack {
+        return TtsPacks.packForVoice(voicePrefs.selectedVoiceId(language))
+            ?: TtsPacks.forLanguage(language)
+            ?: TtsPacks.EN
+    }
+
     private suspend fun prepareNeuralIfNeeded(language: String) {
         if (_state.value.profile != VoiceProfile.Hana) return
         if (TtsPacks.forLanguage(language) == null) return
+        val pack = activePack(language)
         prepareMutex.withLock {
-            if (neural.isLoaded(language)) {
+            if (neural.isLoadedPack(pack.packId)) {
                 markNeuralReady()
                 return
             }
             try {
-                var files = models.files(language)
+                val key = pack.storageKey
+                var files = models.files(key)
                 if (files == null) {
-                    val packName = TtsPacks.forLanguage(language)?.displayName ?: "voice"
                     _state.value = _state.value.copy(
                         downloadProgress = 0f,
-                        status = "Downloading $packName…"
+                        status = "Downloading ${pack.displayName}…"
                     )
-                    files = models.ensure(language) { p ->
+                    files = models.ensure(key) { p ->
                         _state.value = _state.value.copy(
                             downloadProgress = p,
-                            status = "Downloading $packName… ${(p * 100).toInt()}%"
+                            status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%"
                         )
                     }
-                } else if (!neural.isLoaded(language)) {
+                } else {
                     _state.value = _state.value.copy(
                         status = "Preparing voice…",
                         downloadProgress = null
                     )
                 }
                 val modelFiles = files ?: error("Voice pack missing after ensure")
-                if (!neural.isLoaded(language)) {
-                    withContext(Dispatchers.Default) { neural.prepare(language, modelFiles) }
+                if (!neural.isLoadedPack(pack.packId)) {
+                    clearReadyQueue()
+                    withContext(Dispatchers.Default) {
+                        neural.prepare(language, modelFiles, pack.packId)
+                    }
                 }
                 markNeuralReady()
             } catch (t: Throwable) {
@@ -288,7 +302,8 @@ class HanaPlayer(context: Context) {
             }
             return
         }
-        val useNeural = snap.profile == VoiceProfile.Hana && neural.isLoaded(book.language)
+        val useNeural = snap.profile == VoiceProfile.Hana &&
+            neural.isLoadedPack(activePack(book.language).packId)
         _state.value = snap.copy(usingNeural = useNeural)
         if (useNeural) {
             speakNeural(book, list, snap)
@@ -312,40 +327,32 @@ class HanaPlayer(context: Context) {
             val isFirst = firstChunkAfterRestart && sentenceRemainder == null
             if (firstChunkAfterRestart) firstChunkAfterRestart = false
 
-            // Ensure lookahead has at least one ready chunk (show status only if empty).
+            val starved = queueMutex.withLock { readyQueue.isEmpty() }
+
+            // First audible chunk as soon as one is ready — do not wait for a full queue.
             val head = ensureQueueHead(book, snap, sid, speed, isFirst) ?: run {
                 advance(1)
                 return
             }
 
-            // Before first audible play, prefer depth≥2 so chunk1 is ready while chunk0 plays.
-            // (warmPrepare often already did this; Listen without prebuffer pays a short prepare.)
-            if (isFirst && readyQueue.size < QUEUE_DEPTH - 1) {
-                val primeTicker = if (_state.value.status.isNullOrBlank() ||
-                    _state.value.status == "Neural voice ready" ||
-                    _state.value.status == "Starting…"
-                ) {
-                    launchStatusTicker(isFirst = true)
-                } else {
-                    null
-                }
+            // Mid-listen starve: one wait, refill a couple of chunks, then keep streaming.
+            if (!isFirst && starved) {
+                val refillTicker = launchStatusTicker(isFirst = false)
                 try {
-                    while (readyQueue.size < QUEUE_DEPTH - 1 && _state.value.playing) {
+                    while (readyQueue.size < (PLAY_RESUME_DEPTH - 1).coerceAtLeast(1) && _state.value.playing) {
                         val added = topUpOne(book, sid, speed) ?: break
                         if (!added) break
                     }
                 } finally {
-                    primeTicker?.cancel()
+                    refillTicker.cancel()
                 }
             }
 
-            // Top up queue while current audio plays (serial synth on one session).
             kickQueueFill(book, sid, speed)
 
             sentenceRemainder = head.remainder
             val text = head.text
             val consumed = head.consumed
-            val started = SystemClock.elapsedRealtime()
             val generateMs = head.generateMs
             val audio = head.audio
             val audioMs = if (audio.sampleRate > 0) {
@@ -357,12 +364,12 @@ class HanaPlayer(context: Context) {
             Log.i(
                 TAG,
                 "chars=${text.length} generateMs=$generateMs audioMs=$audioMs rtf=${"%.2f".format(rtf)} " +
-                    "queueHit=${!head.synthesizedInline} queueSize=${readyQueue.size} first=$isFirst"
+                    "queueHit=${!head.synthesizedInline} queueSize=${readyQueue.size} first=$isFirst " +
+                    "pack=${activePack(book.language).packId}"
             )
-            // Playing from queue — keep Kokoro caption (clear synth status).
             _state.value = _state.value.copy(status = null)
-            // Do NOT call neural.stop() here — advance/continue must not kill the track.
-            withContext(Dispatchers.IO) { neural.play(audio) }
+            // Persistent stream — never stop/recreate the track between chunks (cuts mid-word).
+            withContext(Dispatchers.IO) { neural.writeStreaming(audio) }
             if (_state.value.playing) {
                 if (head.remainder != null) {
                     continueSpeaking()
@@ -389,8 +396,7 @@ class HanaPlayer(context: Context) {
 
     /**
      * Take queue head if it matches the current speak position; otherwise rebuild
-     * and synthesize. Shows Synthesizing/Getting first line only when the listener
-     * would otherwise hear silence (queue empty).
+     * and synthesize. Status is only shown when the listener would hear silence.
      */
     private suspend fun ensureQueueHead(
         book: Book,
@@ -503,6 +509,7 @@ class HanaPlayer(context: Context) {
             // Only enqueue if still relevant (tail still past this plan).
             if (!_state.value.playing && readyQueue.size >= QUEUE_DEPTH) return false
             readyQueue.addLast(chunk)
+            queuePackId = activePack(book.language).packId
         }
         return true
     }
@@ -525,7 +532,10 @@ class HanaPlayer(context: Context) {
                 ch += 1
                 se = 0
             } else {
-                pause()
+                speakJob = scope.launch {
+                    withContext(Dispatchers.IO) { neural.waitUntilDrained() }
+                    if (_state.value.playing) pause()
+                }
                 return
             }
         }
@@ -562,7 +572,7 @@ class HanaPlayer(context: Context) {
      */
     private suspend fun prebufferFirstUtterance(book: Book, chapterIndex: Int, sentenceIndex: Int) {
         if (_state.value.profile != VoiceProfile.Hana) return
-        if (!neural.isLoaded(book.language)) return
+        if (!neural.isLoadedPack(activePack(book.language).packId)) return
         if (_state.value.playing) return
         val ch = chapterIndex.coerceAtLeast(0)
         val se = sentenceIndex.coerceAtLeast(0)
@@ -570,7 +580,11 @@ class HanaPlayer(context: Context) {
         if (se !in list.indices) return
 
         queueMutex.withLock {
-            val planned = planFirstUtterance(ch, se, list) ?: return
+            val planned = planFirstUtterance(
+                ch, se, list,
+                language = book.language,
+                kind = activePack(book.language).kind
+            ) ?: return
             val head = readyQueue.peekFirst()
             if (head != null && head.key == planned.key && readyQueue.size >= QUEUE_DEPTH) return
             if (head == null || head.key != planned.key) {
@@ -599,13 +613,16 @@ class HanaPlayer(context: Context) {
         fillJob = null
         readyQueue.clear()
         queueTail = null
+        queuePackId = null
     }
 
     private fun queueHeadMatchesFirst(book: Book): Boolean {
         val planned = planFirstUtterance(
             _state.value.chapterIndex,
             _state.value.sentenceIndex,
-            sentences(book, _state.value.chapterIndex)
+            sentences(book, _state.value.chapterIndex),
+            language = book.language,
+            kind = activePack(book.language).kind
         ) ?: return false
         val head = readyQueue.peekFirst() ?: return false
         return head.key == planned.key
@@ -654,7 +671,11 @@ class HanaPlayer(context: Context) {
             list
         }
         if (se !in effectiveList.indices) return null
-        val (maxSentences, maxChars) = chunkLimits(book.language, cursor.isFirst)
+        val (maxSentences, maxChars) = chunkLimits(
+            book.language,
+            cursor.isFirst,
+            activePack(book.language).kind
+        )
         val chunk = TextUtil.speakChunk(
             effectiveList,
             se,
@@ -704,9 +725,8 @@ class HanaPlayer(context: Context) {
 
     private fun launchStatusTicker(isFirst: Boolean): Job {
         val t0 = SystemClock.elapsedRealtime()
-        _state.value = _state.value.copy(
-            status = if (isFirst) "Getting first line…" else "Synthesizing…"
-        )
+        val base = if (isFirst) "Getting first line…" else "Preparing a few lines…"
+        _state.value = _state.value.copy(status = base)
         return scope.launch {
             var lastSec = -1
             while (true) {
@@ -714,11 +734,7 @@ class HanaPlayer(context: Context) {
                 val sec = ((SystemClock.elapsedRealtime() - t0) / 1000L).toInt()
                 if (sec != lastSec) {
                     lastSec = sec
-                    val label = if (isFirst) {
-                        if (sec <= 0) "Getting first line…" else "Getting first line… ${sec}s"
-                    } else {
-                        if (sec <= 0) "Synthesizing…" else "Synthesizing… ${sec}s"
-                    }
+                    val label = if (sec <= 0) base else "$base ${sec}s"
                     _state.value = _state.value.copy(status = label)
                 }
             }
@@ -766,7 +782,9 @@ class HanaPlayer(context: Context) {
         private const val TAG = "HanaTts"
         private const val STATUS_TICK_MS = 500L
         /** Lookahead depth: keep this many synthesized chunks ready ahead of play. */
-        const val QUEUE_DEPTH = 2
+        const val QUEUE_DEPTH = 4
+        /** After a starve, wait until this many chunks exist before resuming audio. */
+        const val PLAY_RESUME_DEPTH = 2
         /** EN continuous: 1 sentence / ~64 chars for first and later (RTF keep-up). */
         const val EN_LATER_MAX_SENTENCES = 1
         const val EN_LATER_MAX_CHARS = TextUtil.EN_CHUNK_MAX_CHARS
@@ -780,7 +798,14 @@ class HanaPlayer(context: Context) {
             }
         }
 
-        fun chunkLimits(language: String, isFirst: Boolean): Pair<Int, Int> {
+        fun chunkLimits(
+            language: String,
+            isFirst: Boolean,
+            kind: NeuralKind = NeuralKind.Kokoro
+        ): Pair<Int, Int> {
+            if (kind == NeuralKind.Piper && language == "en") {
+                return if (isFirst) 1 to 120 else 2 to 280
+            }
             return when {
                 isFirst -> 1 to TextUtil.FIRST_UTTERANCE_MAX_CHARS
                 language == "en" -> EN_LATER_MAX_SENTENCES to EN_LATER_MAX_CHARS
@@ -814,14 +839,17 @@ class HanaPlayer(context: Context) {
         fun planFirstUtterance(
             chapterIndex: Int,
             sentenceIndex: Int,
-            sentences: List<String>
+            sentences: List<String>,
+            language: String = "en",
+            kind: NeuralKind = NeuralKind.Kokoro
         ): PlannedUtterance? {
             if (sentenceIndex !in sentences.indices) return null
+            val (maxSentences, maxChars) = chunkLimits(language, isFirst = true, kind)
             val chunk = TextUtil.speakChunk(
                 sentences,
                 sentenceIndex,
-                maxSentences = 1,
-                maxChars = TextUtil.FIRST_UTTERANCE_MAX_CHARS,
+                maxSentences = maxSentences,
+                maxChars = maxChars,
                 isFirst = true
             )
             if (chunk.text.isBlank()) return null
@@ -846,7 +874,8 @@ class HanaPlayer(context: Context) {
             remainder: String?,
             language: String,
             isFirst: Boolean,
-            count: Int
+            count: Int,
+            kind: NeuralKind = NeuralKind.Kokoro
         ): List<PlannedChunk> {
             val out = ArrayList<PlannedChunk>(count)
             var ch = chapterIndex
@@ -870,7 +899,7 @@ class HanaPlayer(context: Context) {
                 } else {
                     list
                 }
-                val (maxSentences, maxChars) = chunkLimits(language, first)
+                val (maxSentences, maxChars) = chunkLimits(language, first, kind)
                 val chunk = TextUtil.speakChunk(
                     effective,
                     se,
