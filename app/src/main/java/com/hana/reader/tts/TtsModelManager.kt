@@ -1,6 +1,16 @@
 package com.hana.reader.tts
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
@@ -18,15 +28,50 @@ data class ModelFiles(
     val voices: File?
 )
 
-class TtsModelManager(context: Context) {
+sealed class TtsDownloadState {
+    data object Idle : TtsDownloadState()
+    data class Downloading(
+        val language: String,
+        val progress: Float,
+        val stage: String
+    ) : TtsDownloadState()
+    data class Failed(val language: String, val message: String) : TtsDownloadState()
+    data class Ready(val language: String) : TtsDownloadState()
+}
+
+/**
+ * Pack download manager. Downloads run on an app-lifetime [scope] so leaving
+ * VoicesScreen does not cancel work. Concurrent [ensure] for the same language
+ * awaits the same in-flight job (gate mutex is only held to register the job,
+ * never around the blocking HTTP download).
+ */
+class TtsModelManager(
+    context: Context,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+) {
     private val root = File(context.applicationContext.filesDir, "tts")
-    private val mutex = Mutex()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val gate = Mutex()
+    private val inFlight = mutableMapOf<String, Job>()
+    private val outcomes = mutableMapOf<String, Result<ModelFiles>>()
+
     @Volatile var lastError: String? = null
         private set
+
+    private val _downloadState = MutableStateFlow<TtsDownloadState>(TtsDownloadState.Idle)
+    val downloadState: StateFlow<TtsDownloadState> = _downloadState.asStateFlow()
 
     fun isReady(language: String): Boolean {
         val pack = TtsPacks.forLanguage(language) ?: return false
         return readyMatches(language, pack) && findFiles(langDir(language), pack.kind) != null
+    }
+
+    /** Leftover extract/partial without a matching .ready marker. */
+    fun isIncomplete(language: String): Boolean {
+        val dir = langDir(language)
+        if (!dir.isDirectory) return false
+        if (isReady(language)) return false
+        return dir.walkTopDown().any { it.isFile && it.name != READY }
     }
 
     fun files(language: String): ModelFiles? {
@@ -35,30 +80,111 @@ class TtsModelManager(context: Context) {
         return findFiles(langDir(language), pack.kind)
     }
 
-    suspend fun ensure(language: String, onProgress: (Float) -> Unit): ModelFiles {
-        mutex.withLock {
+    fun isDownloading(language: String): Boolean {
+        val s = _downloadState.value
+        return s is TtsDownloadState.Downloading && s.language == language
+    }
+
+    /**
+     * Ensure the pack is on disk. Survives leaving the UI; if a download for
+     * [language] is already running, waits for that job.
+     */
+    suspend fun ensure(language: String, onProgress: ((Float) -> Unit)? = null): ModelFiles {
+        files(language)?.let {
+            publish(TtsDownloadState.Ready(language))
+            return it
+        }
+        val pack = TtsPacks.forLanguage(language)
+            ?: error("No neural voice for $language")
+
+        val job = gate.withLock {
             files(language)?.let { return it }
-            val pack = TtsPacks.forLanguage(language)
-                ?: error("No neural voice for $language")
-            lastError = null
-            val dir = langDir(language)
-            dir.deleteRecursively()
-            dir.mkdirs()
-            val archive = File(dir, pack.archiveName)
-            try {
-                download(pack.url, archive, pack.minArchiveBytes, onProgress)
-                extractTarBz2(archive, dir)
-                archive.delete()
-                val found = findFiles(dir, pack.kind)
-                    ?: error("Voice pack extracted but files were missing")
-                File(dir, READY).writeText(pack.packId)
-                onProgress(1f)
-                return found
-            } catch (t: Throwable) {
-                archive.delete()
-                lastError = t.message ?: "Download failed"
-                throw t
+            val existing = inFlight[language]
+            if (existing != null && existing.isActive) {
+                existing
+            } else {
+                outcomes.remove(language)
+                scope.launch {
+                    runDownload(pack, language, onProgress)
+                }.also { inFlight[language] = it }
             }
+        }
+
+        job.join()
+
+        gate.withLock {
+            val result = outcomes[language]
+            if (result != null) return result.getOrThrow()
+        }
+        files(language)?.let { return it }
+        error(lastError ?: "Download failed")
+    }
+
+    /** Fire-and-forget download that survives screen teardown. */
+    fun startDownload(language: String) {
+        if (isReady(language)) return
+        scope.launch {
+            runCatching { ensure(language) }
+        }
+    }
+
+    private suspend fun runDownload(
+        pack: TtsPack,
+        language: String,
+        onProgress: ((Float) -> Unit)?
+    ) {
+        try {
+            lastError = null
+            publish(TtsDownloadState.Downloading(language, 0f, "Connecting…"))
+            val found = downloadAndExtract(pack, language) { p, stage ->
+                publish(TtsDownloadState.Downloading(language, p, stage))
+                onProgress?.invoke(p)
+            }
+            gate.withLock { outcomes[language] = Result.success(found) }
+            publish(TtsDownloadState.Ready(language))
+        } catch (t: Throwable) {
+            val msg = t.message ?: "Download failed"
+            lastError = msg
+            gate.withLock { outcomes[language] = Result.failure(t) }
+            publish(TtsDownloadState.Failed(language, msg))
+        } finally {
+            gate.withLock { inFlight.remove(language) }
+        }
+    }
+
+    private fun downloadAndExtract(
+        pack: TtsPack,
+        language: String,
+        onProgress: (Float, String) -> Unit
+    ): ModelFiles {
+        val dir = langDir(language)
+        dir.deleteRecursively()
+        dir.mkdirs()
+        val archive = File(dir, pack.archiveName)
+        try {
+            onProgress(0f, "Connecting…")
+            download(pack.url, archive, pack.minArchiveBytes) { p ->
+                onProgress(p, "Downloading… ${(p * 100).toInt()}%")
+            }
+            onProgress(0.96f, "Extracting…")
+            extractTarBz2(archive, dir)
+            archive.delete()
+            val found = findFiles(dir, pack.kind)
+                ?: error("Voice pack extracted but files were missing")
+            File(dir, READY).writeText(pack.packId)
+            onProgress(1f, "Ready")
+            return found
+        } catch (t: Throwable) {
+            archive.delete()
+            throw t
+        }
+    }
+
+    private fun publish(state: TtsDownloadState) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            _downloadState.value = state
+        } else {
+            mainHandler.post { _downloadState.value = state }
         }
     }
 
@@ -70,6 +196,12 @@ class TtsModelManager(context: Context) {
 
     fun deletePack(language: String) {
         langDir(language).deleteRecursively()
+        scope.launch {
+            gate.withLock {
+                outcomes.remove(language)
+            }
+            publish(TtsDownloadState.Idle)
+        }
     }
 
     fun installedBytes(language: String): Long {
@@ -89,6 +221,11 @@ class TtsModelManager(context: Context) {
             connectTimeout = 30_000
             readTimeout = 120_000
             setRequestProperty("User-Agent", "HanaReader/1.2")
+        }
+        try {
+            conn.connect()
+        } catch (t: Throwable) {
+            error("Connect timeout or network error: ${t.message ?: "failed"}")
         }
         conn.inputStream.use { input ->
             val total = conn.contentLengthLong.coerceAtLeast(1L)

@@ -19,20 +19,20 @@ class ProgressStore(context: Context) {
         return !s.email.isNullOrBlank() || s.localOnly
     }
 
-    fun saveGoogle(email: String, photoUrl: String?) {
-        prefs.edit()
+    fun saveGoogle(email: String, photoUrl: String?): Boolean {
+        return prefs.edit()
             .putString("email", email)
             .putString("photo", photoUrl)
             .putBoolean("local", false)
-            .apply()
+            .commit()
     }
 
-    fun saveLocal() {
-        prefs.edit().putBoolean("local", true).apply()
+    fun saveLocal(): Boolean {
+        return prefs.edit().putBoolean("local", true).commit()
     }
 
-    fun signOut() {
-        prefs.edit().remove("email").remove("photo").putBoolean("local", false).apply()
+    fun signOut(): Boolean {
+        return prefs.edit().remove("email").remove("photo").putBoolean("local", false).commit()
     }
 
     fun get(bookId: String): ReadingProgress? {

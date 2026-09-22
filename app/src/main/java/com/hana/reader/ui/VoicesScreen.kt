@@ -35,8 +35,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.hana.reader.tts.CatalogVoice
 import com.hana.reader.tts.HanaPlayer
+import com.hana.reader.tts.TtsDownloadState
 import com.hana.reader.tts.TtsPacks
 import com.hana.reader.tts.VoiceCatalog
 import com.hana.reader.tts.VoiceProfile
@@ -74,16 +75,20 @@ fun VoicesScreen(nav: NavHostController) {
     var idReady by remember { mutableStateOf(models.isReady("id")) }
     var enBytes by remember { mutableStateOf(models.installedBytes("en")) }
     var idBytes by remember { mutableStateOf(models.installedBytes("id")) }
-    var downloadingLang by remember { mutableStateOf<String?>(null) }
-    var progress by remember { mutableFloatStateOf(0f) }
+    var enIncomplete by remember { mutableStateOf(models.isIncomplete("en")) }
+    var idIncomplete by remember { mutableStateOf(models.isIncomplete("id")) }
     var status by remember { mutableStateOf<String?>(null) }
     var previewing by remember { mutableStateOf(false) }
+
+    val download by models.downloadState.collectAsState()
 
     fun refresh() {
         enReady = models.isReady("en")
         idReady = models.isReady("id")
         enBytes = models.installedBytes("en")
         idBytes = models.installedBytes("id")
+        enIncomplete = models.isIncomplete("en")
+        idIncomplete = models.isIncomplete("id")
         selectedId = prefs.selectedVoiceId(langTab)
     }
 
@@ -91,10 +96,39 @@ fun VoicesScreen(nav: NavHostController) {
         selectedId = prefs.selectedVoiceId(langTab)
     }
 
+    LaunchedEffect(download) {
+        when (val d = download) {
+            is TtsDownloadState.Ready -> {
+                refresh()
+                status = "Ready"
+                // Warm-load neural so first Listen is not a cold prepare.
+                player.warmPrepare(d.language)
+            }
+            is TtsDownloadState.Failed -> {
+                if (d.language == langTab) status = d.message
+                refresh()
+            }
+            is TtsDownloadState.Downloading -> {
+                if (d.language == langTab) status = d.stage
+            }
+            else -> Unit
+        }
+    }
+
     val pack = TtsPacks.forLanguage(langTab)!!
     val packReady = if (langTab == "en") enReady else idReady
     val packBytes = if (langTab == "en") enBytes else idBytes
+    val packIncomplete = if (langTab == "en") enIncomplete else idIncomplete
     val voices = VoiceCatalog.forLanguage(langTab)
+
+    val downloadingThis = download is TtsDownloadState.Downloading &&
+        (download as TtsDownloadState.Downloading).language == langTab
+    val downloadProgress = (download as? TtsDownloadState.Downloading)
+        ?.takeIf { it.language == langTab }?.progress ?: 0f
+    val downloadStage = (download as? TtsDownloadState.Downloading)
+        ?.takeIf { it.language == langTab }?.stage
+    val failedThis = download as? TtsDownloadState.Failed
+    val failedMsg = failedThis?.takeIf { it.language == langTab }?.message
 
     Column(
         Modifier
@@ -163,55 +197,65 @@ fun VoicesScreen(nav: NavHostController) {
                     modifier = Modifier.padding(top = 2.dp)
                 )
                 Text(
-                    if (packReady) "Installed · ${formatMb(packBytes)}" else "Not downloaded",
-                    color = if (packReady) Rose else Muted,
+                    when {
+                        packReady -> "Installed · ${formatMb(packBytes)}"
+                        packIncomplete && !downloadingThis -> "Incomplete — tap to retry"
+                        else -> "Not downloaded"
+                    },
+                    color = when {
+                        packReady -> Rose
+                        packIncomplete -> Rose
+                        else -> Muted
+                    },
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(top = 8.dp)
                 )
-                if (downloadingLang == langTab) {
+                if (downloadingThis) {
                     LinearProgressIndicator(
-                        progress = { progress },
+                        progress = { downloadProgress },
                         modifier = Modifier
                             .padding(top = 10.dp)
                             .fillMaxWidth(),
                         color = Rose,
                         trackColor = Subtle
                     )
-                    Text(status ?: "Downloading…", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                    Text(
+                        downloadStage ?: status ?: "Downloading…",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                } else if (failedMsg != null) {
+                    Text(
+                        "Failed: $failedMsg",
+                        color = Rose,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
                 }
                 Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (!packReady) {
                         Button(
                             onClick = {
-                                if (downloadingLang != null) return@Button
-                                downloadingLang = langTab
-                                progress = 0f
-                                status = "Starting…"
-                                scope.launch {
-                                    runCatching {
-                                        withContext(Dispatchers.IO) {
-                                            models.ensure(langTab) { p ->
-                                                progress = p
-                                                status = "Downloading… ${(p * 100).toInt()}%"
-                                            }
-                                        }
-                                    }.onSuccess {
-                                        status = "Ready"
-                                        refresh()
-                                    }.onFailure {
-                                        status = it.message ?: "Download failed"
-                                    }
-                                    downloadingLang = null
-                                }
+                                if (downloadingThis) return@Button
+                                status = "Connecting…"
+                                models.startDownload(langTab)
                             },
+                            enabled = !downloadingThis,
                             colors = ButtonDefaults.buttonColors(containerColor = Rose),
                             shape = CircleShape,
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                         ) {
                             Icon(Icons.Default.CloudDownload, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Download pack")
+                            Text(
+                                when {
+                                    downloadingThis -> "Downloading…"
+                                    failedMsg != null || packIncomplete -> "Retry"
+                                    else -> "Download pack"
+                                }
+                            )
                         }
                     } else {
                         TextButton(onClick = {
@@ -255,7 +299,6 @@ fun VoicesScreen(nav: NavHostController) {
                     onSelect = {
                         prefs.setSelectedVoiceId(langTab, voice.id)
                         selectedId = voice.id
-                        // Force Hana profile so neural path is preferred next listen
                         player.setProfile(VoiceProfile.Hana)
                         status = "Selected ${voice.label}"
                     },
@@ -277,6 +320,7 @@ fun VoicesScreen(nav: NavHostController) {
                                     neural.play(pcm)
                                 }
                             }.onFailure {
+                                // Keep showing status so the user sees why preview failed.
                                 status = it.message ?: "Preview failed"
                             }
                             previewing = false

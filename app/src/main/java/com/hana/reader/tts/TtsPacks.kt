@@ -77,6 +77,14 @@ object TtsPacks {
         selectedVoiceName: String? = null
     ): String {
         if (downloading) return status ?: "Downloading voice…"
+        // Surface prepare/synth wait so Listen does not look frozen.
+        if (status != null && (
+            status.contains("Preparing", ignoreCase = true) ||
+            status.contains("Synthesizing", ignoreCase = true) ||
+            status.contains("Loading", ignoreCase = true)
+        )) {
+            return status
+        }
         return when {
             profile == VoiceProfile.Hana && usingNeural -> {
                 val pack = forLanguage(language)

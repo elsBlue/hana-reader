@@ -46,6 +46,8 @@ class HanaPlayer(context: Context) {
     private var speakJob: Job? = null
     private var prefetch: kotlinx.coroutines.Deferred<PcmAudio?>? = null
     private var prefetchKey: String? = null
+    /** After play/restart, first EN neural chunk is short for faster time-to-first-audio. */
+    private var firstChunkAfterRestart = true
 
     fun play(book: Book, chapterIndex: Int? = null, sentenceIndex: Int? = null) {
         val saved = store.get(book.id)
@@ -139,6 +141,14 @@ class HanaPlayer(context: Context) {
     fun modelManager(): TtsModelManager = models
     fun neuralEngine(): NeuralTtsEngine = neural
 
+    /** Kick neural prepare early (Voices ready / Reader open) so Listen is warm. */
+    fun warmPrepare(language: String) {
+        if (_state.value.profile != VoiceProfile.Hana) return
+        if (TtsPacks.forLanguage(language) == null) return
+        if (neural.isLoaded(language)) return
+        scope.launch { prepareNeuralIfNeeded(language) }
+    }
+
     fun shutdown() {
         pause()
         neural.release()
@@ -150,11 +160,17 @@ class HanaPlayer(context: Context) {
         prefetch?.cancel()
         prefetch = null
         prefetchKey = null
+        firstChunkAfterRestart = true
         neural.stop()
         system.stop()
         speakJob = scope.launch {
             val book = _state.value.book ?: return@launch
-            if (prepare) prepareNeuralIfNeeded(book.language)
+            if (prepare) {
+                if (!neural.isLoaded(book.language) && _state.value.profile == VoiceProfile.Hana) {
+                    _state.value = _state.value.copy(status = "Preparing voice…")
+                }
+                prepareNeuralIfNeeded(book.language)
+            }
             if (_state.value.playing) speakOnce()
         }
     }
@@ -185,13 +201,16 @@ class HanaPlayer(context: Context) {
                             status = "Downloading $packName… ${(p * 100).toInt()}%"
                         )
                     }
-                } else {
+                } else if (!neural.isLoaded(language)) {
                     _state.value = _state.value.copy(
-                        status = "Loading neural voice…",
+                        status = "Preparing voice…",
                         downloadProgress = null
                     )
                 }
-                withContext(Dispatchers.Default) { neural.prepare(language, files) }
+                val modelFiles = files ?: error("Voice pack missing after ensure")
+                if (!neural.isLoaded(language)) {
+                    withContext(Dispatchers.Default) { neural.prepare(language, modelFiles) }
+                }
                 _state.value = _state.value.copy(
                     usingNeural = true,
                     downloadProgress = null,
@@ -244,8 +263,24 @@ class HanaPlayer(context: Context) {
         try {
             val speed = snap.rate
             val sid = TtsPacks.speakerId(book.language, snap.profile, voicePrefs.selectedSid(book.language))
-            val maxSentences = if (book.language == "en") 3 else 2
-            val maxChars = if (book.language == "en") 500 else 320
+            // First audible chunk: 1 short sentence (~200 chars) for faster TTFA.
+            // Later EN chunks stay modest (2 / ~400) for prosody without long waits.
+            val isFirst = firstChunkAfterRestart
+            firstChunkAfterRestart = false
+            val maxSentences: Int
+            val maxChars: Int
+            if (book.language == "en") {
+                if (isFirst) {
+                    maxSentences = 1
+                    maxChars = 200
+                } else {
+                    maxSentences = 2
+                    maxChars = 400
+                }
+            } else {
+                maxSentences = 2
+                maxChars = 320
+            }
             val (text, consumed) = TextUtil.speakChunk(
                 list,
                 snap.sentenceIndex,
@@ -261,10 +296,15 @@ class HanaPlayer(context: Context) {
             prefetch?.cancel()
             prefetch = null
             prefetchKey = null
+            if (pcm == null) {
+                _state.value = _state.value.copy(status = "Synthesizing…")
+            }
             val audio = pcm ?: withContext(Dispatchers.Default) {
                 neural.synthesize(text, book.language, sid, speed)
             }
+            // Prefetch next while current plays (engine lock serializes generate).
             prefetchNext(book, snap, consumed, sid, speed)
+            _state.value = _state.value.copy(status = null)
             withContext(Dispatchers.IO) { neural.play(audio) }
             if (_state.value.playing) advance(consumed)
         } catch (t: Throwable) {
@@ -296,8 +336,8 @@ class HanaPlayer(context: Context) {
             se = 0
             list = sentences(book, ch)
         }
-        val maxSentences = if (book.language == "en") 3 else 2
-        val maxChars = if (book.language == "en") 500 else 320
+        val maxSentences = if (book.language == "en") 2 else 2
+        val maxChars = if (book.language == "en") 400 else 320
         val (next, nextConsumed) = TextUtil.speakChunk(list, se, maxSentences, maxChars)
         if (next.isBlank() || nextConsumed <= 0) return
         val key = "hana-$ch-$se-c$nextConsumed"
