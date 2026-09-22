@@ -10,7 +10,7 @@ import java.io.File
 
 class TtsModelFilesTest {
     @Test
-    fun prefersInt8OnnxAndFindsKokoroLayout() {
+    fun prefersFp32OnnxAndFindsKokoroLayout() {
         val dir = File(createTempDir(), "pack").also { it.mkdirs() }
         File(dir, "model.onnx").writeText("full")
         File(dir, "model.int8.onnx").writeText("quant")
@@ -19,7 +19,7 @@ class TtsModelFilesTest {
         File(dir, "espeak-ng-data").mkdirs()
         File(dir, "espeak-ng-data/phontab").writeText("ph")
         val found = TtsModelManager.findFiles(dir, NeuralKind.Kokoro)!!
-        assertEquals("model.int8.onnx", found.onnx.name)
+        assertEquals("model.onnx", found.onnx.name)
         assertTrue(found.voices!!.name == "voices.bin")
         assertEquals("espeak-ng-data", found.dataDir.name)
     }
