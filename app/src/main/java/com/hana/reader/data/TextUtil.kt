@@ -22,6 +22,10 @@ object TextUtil {
         t = t.replace(Regex("\\bMs\\."), "Miss")
         t = t.replace(Regex("\\bDr\\."), "Doctor")
         t = t.replace(Regex("\\bSt\\."), "Saint")
+        // Keep clause marks audible: Piper ignores em-dashes and jammed commas.
+        t = t.replace(Regex("[—–]"), ", ")
+        t = t.replace(Regex("\\s*,\\s*"), ", ")
+        t = t.replace(Regex("\\s+"), " ").trim()
         return t
     }
 
@@ -155,5 +159,19 @@ object TextUtil {
             i++
         }
         return SpeakChunkResult(parts.joinToString(" "), parts.size, remainder = null)
+    }
+
+    /**
+     * Extra silence after a chunk so commas and sentence endings are felt,
+     * not just synthesized. Mid-sentence leftovers get a tiny breath only.
+     */
+    fun trailingPauseMs(text: String): Int {
+        val t = text.trimEnd()
+        if (t.isEmpty()) return 0
+        return when (t.last()) {
+            '.', '!', '?', '…' -> 320
+            ',', ';', ':' -> 140
+            else -> 40
+        }
     }
 }

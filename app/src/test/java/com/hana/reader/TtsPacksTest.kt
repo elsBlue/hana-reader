@@ -115,6 +115,16 @@ class TtsPacksTest {
     }
 
     @Test
+    fun comfortListenHonorsPausesAndSlowsDown() {
+        assertTrue("default rate must be slower than conversation", TtsPacks.DEFAULT_RATE <= 0.85f)
+        assertTrue("silenceScale 0.4 crushed commas", TtsPacks.SILENCE_SCALE >= 1.2f)
+        assertTrue(TtsPacks.LENGTH_SCALE >= 1.1f)
+        assertTrue(TtsPacks.NOISE_SCALE <= 0.55f)
+        assertEquals(320, TtsPacks.SENTENCE_PAUSE_MS)
+        assertEquals(140, TtsPacks.COMMA_PAUSE_MS)
+    }
+
+    @Test
     fun tarSlipIsRejected() {
         assertNull(TtsPacks.safeTarRelative("../evil.bin"))
         assertNull(TtsPacks.safeTarRelative("foo/../../etc/passwd"))

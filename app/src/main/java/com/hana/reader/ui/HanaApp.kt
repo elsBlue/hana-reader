@@ -48,7 +48,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -223,11 +227,21 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
     var books by remember { mutableStateOf(store.allBooks()) }
     val continueBook = store.latest()?.let { store.book(it.bookId) } ?: books.firstOrNull()
     val player = HanaPlayer.get(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                books = store.allBooks()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     // Pre-warm voice + first line for Continue before the user taps Listen.
     LaunchedEffect(continueBook?.id) {
         val book = continueBook ?: return@LaunchedEffect
         if (player.state.value.profile == VoiceProfile.Hana) {
-            player.warmPrepare(book.language, book)
+            runCatching { player.warmPrepare(book.language, book) }
         }
     }
     var error by remember { mutableStateOf<String?>(null) }
@@ -364,7 +378,7 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     // Warm-load neural + pre-buffer first utterance while the user still reads.
     LaunchedEffect(book.id, snap.profile, saved?.chapterIndex, saved?.sentenceIndex) {
         if (snap.profile == VoiceProfile.Hana) {
-            player.warmPrepare(book.language, book)
+            runCatching { player.warmPrepare(book.language, book) }
         }
     }
     val bg = if (night) Color(0xFF161310) else Paper

@@ -185,7 +185,8 @@ class HanaPlayer(context: Context) {
         if (_state.value.profile != VoiceProfile.Hana) return
         if (TtsPacks.forLanguage(language) == null) return
         scope.launch {
-            prepareNeuralIfNeeded(language)
+            runCatching { prepareNeuralIfNeeded(language) }
+                .onFailure { Log.w(TAG, "warmPrepare failed: ${it.message}") }
             val target = book ?: _state.value.book
             if (target != null && target.language == language && neural.isLoadedPack(activePack(language).packId)) {
                 val saved = store.get(target.id)
@@ -343,7 +344,11 @@ class HanaPlayer(context: Context) {
 
     private suspend fun speakNeural(book: Book, list: List<String>, snap: PlayerSnapshot) {
         try {
-            val speed = snap.rate
+            val speed = if (book.language == "id") {
+                (snap.rate * 0.92f).coerceIn(0.7f, 1.15f)
+            } else {
+                snap.rate.coerceIn(0.7f, 1.15f)
+            }
             val sid = TtsPacks.speakerId(book.language, snap.profile, voicePrefs.selectedSid(book.language))
             val isFirst = firstChunkAfterRestart && sentenceRemainder == null
             if (firstChunkAfterRestart) firstChunkAfterRestart = false
@@ -381,7 +386,10 @@ class HanaPlayer(context: Context) {
             _state.value = _state.value.copy(status = hint)
             storyStarted = true
             kickQueueFill(book, sid, speed)
-            withContext(Dispatchers.IO) { neural.writeStreaming(audio) }
+            withContext(Dispatchers.IO) {
+                neural.writeStreaming(audio)
+                neural.writeSilence(audio.sampleRate, TextUtil.trailingPauseMs(text))
+            }
             if (_state.value.playing) {
                 if (head.remainder != null) {
                     continueSpeaking()

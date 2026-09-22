@@ -21,6 +21,21 @@ class TextUtilTest {
     }
 
     @Test
+    fun normalizeKeepsCommaSpacingAndTurnsDashesIntoPauses() {
+        assertEquals("Wait, then go.", TextUtil.normalizeForTts("Wait,then go."))
+        assertEquals("Wait, then go.", TextUtil.normalizeForTts("Wait — then go."))
+    }
+
+    @Test
+    fun trailingPauseHonorsPunctuation() {
+        assertEquals(320, TextUtil.trailingPauseMs("The river was quiet."))
+        assertEquals(320, TextUtil.trailingPauseMs("Are you ready?"))
+        assertEquals(140, TextUtil.trailingPauseMs("Wait, then go,"))
+        assertEquals(40, TextUtil.trailingPauseMs("mid sentence leftover"))
+        assertEquals(0, TextUtil.trailingPauseMs("   "))
+    }
+
+    @Test
     fun speakChunkGroupsSentences() {
         val sentences = listOf("One.", "Two.", "Three.", "Four.")
         val chunk = TextUtil.speakChunk(sentences, 0, maxSentences = 3, maxChars = 500)

@@ -16,8 +16,18 @@ data class TtsPack(
 
 object TtsPacks {
     const val PIPER_SID = 0
-    const val DEFAULT_RATE = 0.92f
-    const val SILENCE_SCALE = 0.4f
+    /** Slightly slower than conversation — people need time to hear the words. */
+    const val DEFAULT_RATE = 0.82f
+    /** 1.0 = natural Piper pauses. 0.4 was crushing commas and sentence gaps. */
+    const val SILENCE_SCALE = 1.35f
+    /** >1 draws vowels out a little so Smooth is not a rush. */
+    const val LENGTH_SCALE = 1.12f
+    /** Lower than Piper default (0.667) — cuts the VITS radio-static shimmer. */
+    const val NOISE_SCALE = 0.50f
+    const val NOISE_SCALE_W = 0.60f
+    const val SENTENCE_PAUSE_MS = 320
+    const val COMMA_PAUSE_MS = 140
+    const val BREATH_PAUSE_MS = 40
     const val RETIRED_KOKORO_STORAGE_KEY = "en"
 
     val EN_SMOOTH = TtsPack(
