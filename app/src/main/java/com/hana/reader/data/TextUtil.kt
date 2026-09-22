@@ -2,7 +2,7 @@ package com.hana.reader.data
 
 object TextUtil {
     /** Hard cap for the first audible neural chunk (faster TTFA). */
-    const val FIRST_UTTERANCE_MAX_CHARS = 100
+    const val FIRST_UTTERANCE_MAX_CHARS = 48
 
     fun normalizeForTts(text: String): String {
         var t = text

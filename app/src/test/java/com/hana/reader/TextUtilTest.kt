@@ -69,11 +69,11 @@ class TextUtilTest {
             } else {
                 sentences
             }
-            val maxChars = if (isFirst) TextUtil.FIRST_UTTERANCE_MAX_CHARS else 400
+            val maxChars = if (isFirst) TextUtil.FIRST_UTTERANCE_MAX_CHARS else com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS
             val chunk = TextUtil.speakChunk(
                 effective,
                 start,
-                maxSentences = if (isFirst) 1 else 2,
+                maxSentences = if (isFirst) 1 else com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_SENTENCES,
                 maxChars = maxChars,
                 isFirst = isFirst
             )
@@ -109,11 +109,12 @@ class TextUtilTest {
 
     @Test
     fun hardCapPrefersClausePunctuation() {
-        // Comma must sit after minKeep (~cap/3) so clause split wins over whitespace.
-        val text = "Words before the break keep growing steadily here, then this long tail continues well past the hundred character hard cap for sure."
+        // Comma must sit after minKeep (~cap/3) and before the 48-char cap.
+        val text = "Short words grow here, then this long tail continues well past the forty eight character hard cap for sure."
         assertTrue(text.length > TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         val commaAt = text.indexOf(',')
         assertTrue("comma should be after minKeep", commaAt >= TextUtil.FIRST_UTTERANCE_MAX_CHARS / 3)
+        assertTrue("comma should be before hard cap", commaAt < TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         val (prefix, rest) = TextUtil.hardCapUtterance(text, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         assertTrue(prefix.length <= TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         assertNotNull(rest)
@@ -122,5 +123,44 @@ class TextUtilTest {
             TextUtil.normalizeForTts(text),
             TextUtil.normalizeForTts("$prefix ${rest!!}")
         )
+    }
+
+    @Test
+    fun firstUtteranceMaxCharsIsFortyEight() {
+        assertEquals(48, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
+    }
+
+    @Test
+    fun firstUtterancePrefetchKeyMatchesSpeakChunkPlan() {
+        val sentences = listOf(
+            "In the quiet valley the mist rose slowly over stones and distant bells,",
+            "Then a short closer."
+        )
+        // Plan at chapter 0 / sentence 0 — same ingredients speakNeural looks up.
+        val planned = com.hana.reader.tts.HanaPlayer.planFirstUtterance(0, 0, sentences)
+        assertNotNull(planned)
+        val chunk = TextUtil.speakChunk(
+            sentences,
+            0,
+            maxSentences = 1,
+            maxChars = TextUtil.FIRST_UTTERANCE_MAX_CHARS,
+            isFirst = true
+        )
+        assertEquals(chunk.text, planned!!.chunk.text)
+        assertEquals(chunk.consumed, planned.chunk.consumed)
+        assertEquals(chunk.remainder, planned.chunk.remainder)
+        val expectedKey = com.hana.reader.tts.HanaPlayer.utterancePrefetchKey(
+            chapterIndex = 0,
+            sentenceIndex = 0,
+            consumed = chunk.consumed,
+            hasRemainder = chunk.remainder != null,
+            textLength = chunk.text.length
+        )
+        assertEquals(expectedKey, planned.key)
+        assertTrue(
+            "first utterance must stay near 48-char cap, was ${chunk.text.length}",
+            chunk.text.length <= TextUtil.FIRST_UTTERANCE_MAX_CHARS + 5
+        )
+        assertNotNull("long first sentence should leave a remainder", chunk.remainder)
     }
 }

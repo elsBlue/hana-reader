@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,11 +58,13 @@ class HanaPlayer(context: Context) {
         val saved = store.get(book.id)
         val ch = chapterIndex ?: saved?.chapterIndex ?: 0
         val se = sentenceIndex ?: saved?.sentenceIndex ?: 0
+        // Instant tap feedback — never look like a no-op while pre-buffer/synth catches up.
         _state.value = _state.value.copy(
             book = book,
             chapterIndex = ch.coerceAtLeast(0),
             sentenceIndex = se.coerceAtLeast(0),
-            playing = true
+            playing = true,
+            status = "Starting…"
         )
         persist()
         ReadingService.start(appContext)
@@ -110,7 +113,12 @@ class HanaPlayer(context: Context) {
         sentenceRemainder = null
         _state.value = snap.copy(chapterIndex = ch, sentenceIndex = se)
         persist()
-        if (snap.playing) restartSpeak(prepare = true)
+        if (snap.playing) {
+            restartSpeak(prepare = true)
+        } else {
+            cancelMismatchedPrebuffer(book, ch, se)
+            scope.launch { prebufferFirstUtterance(book, ch, se) }
+        }
     }
 
     fun skipChapter(delta: Int) {
@@ -120,7 +128,12 @@ class HanaPlayer(context: Context) {
         sentenceRemainder = null
         _state.value = snap.copy(chapterIndex = ch, sentenceIndex = 0)
         persist()
-        if (snap.playing) restartSpeak(prepare = true)
+        if (snap.playing) {
+            restartSpeak(prepare = true)
+        } else {
+            cancelMismatchedPrebuffer(book, ch, 0)
+            scope.launch { prebufferFirstUtterance(book, ch, 0) }
+        }
     }
 
     fun setProfile(profile: VoiceProfile) {
@@ -148,12 +161,33 @@ class HanaPlayer(context: Context) {
     fun modelManager(): TtsModelManager = models
     fun neuralEngine(): NeuralTtsEngine = neural
 
-    /** Kick neural prepare early (Voices ready / Reader open) so Listen is warm. */
-    fun warmPrepare(language: String) {
+    /**
+     * Kick neural prepare early (Voices ready / Reader open) so Listen is warm.
+     * When [book] is provided (or already in state), also pre-synthesize the first
+     * hard-capped utterance into the prefetch slot while the user is still reading.
+     */
+    fun warmPrepare(language: String, book: Book? = null) {
         if (_state.value.profile != VoiceProfile.Hana) return
         if (TtsPacks.forLanguage(language) == null) return
-        if (neural.isLoaded(language)) return
-        scope.launch { prepareNeuralIfNeeded(language) }
+        scope.launch {
+            prepareNeuralIfNeeded(language)
+            val target = book ?: _state.value.book
+            if (target != null && target.language == language && neural.isLoaded(language)) {
+                val saved = store.get(target.id)
+                val snap = _state.value
+                val ch = if (snap.book?.id == target.id) {
+                    snap.chapterIndex
+                } else {
+                    saved?.chapterIndex ?: 0
+                }
+                val se = if (snap.book?.id == target.id) {
+                    snap.sentenceIndex
+                } else {
+                    saved?.sentenceIndex ?: 0
+                }
+                prebufferFirstUtterance(target, ch, se)
+            }
+        }
     }
 
     fun shutdown() {
@@ -164,9 +198,22 @@ class HanaPlayer(context: Context) {
 
     private fun restartSpeak(prepare: Boolean) {
         speakJob?.cancel()
-        prefetch?.cancel()
-        prefetch = null
-        prefetchKey = null
+        // Preserve in-flight / ready first-utterance pre-buffer when position matches.
+        val bookNow = _state.value.book
+        val keepKey = if (bookNow != null) {
+            firstUtterancePrefetchKey(
+                bookNow,
+                _state.value.chapterIndex,
+                _state.value.sentenceIndex
+            )
+        } else {
+            null
+        }
+        if (keepKey == null || prefetchKey != keepKey) {
+            prefetch?.cancel()
+            prefetch = null
+            prefetchKey = null
+        }
         sentenceRemainder = null
         firstChunkAfterRestart = true
         neural.stop()
@@ -175,7 +222,9 @@ class HanaPlayer(context: Context) {
             val book = _state.value.book ?: return@launch
             if (prepare) {
                 if (!neural.isLoaded(book.language) && _state.value.profile == VoiceProfile.Hana) {
-                    _state.value = _state.value.copy(status = "Preparing voice…")
+                    if (_state.value.status == null || _state.value.status == "Starting…") {
+                        _state.value = _state.value.copy(status = "Preparing voice…")
+                    }
                 }
                 prepareNeuralIfNeeded(book.language)
             }
@@ -188,11 +237,7 @@ class HanaPlayer(context: Context) {
         if (TtsPacks.forLanguage(language) == null) return
         prepareMutex.withLock {
             if (neural.isLoaded(language)) {
-                _state.value = _state.value.copy(
-                    usingNeural = true,
-                    downloadProgress = null,
-                    status = "Neural voice ready"
-                )
+                markNeuralReady()
                 return
             }
             try {
@@ -219,11 +264,7 @@ class HanaPlayer(context: Context) {
                 if (!neural.isLoaded(language)) {
                     withContext(Dispatchers.Default) { neural.prepare(language, modelFiles) }
                 }
-                _state.value = _state.value.copy(
-                    usingNeural = true,
-                    downloadProgress = null,
-                    status = "Neural voice ready"
-                )
+                markNeuralReady()
             } catch (t: Throwable) {
                 val why = models.lastError ?: t.message?.take(48) ?: "load failed"
                 _state.value = _state.value.copy(
@@ -271,8 +312,8 @@ class HanaPlayer(context: Context) {
         try {
             val speed = snap.rate
             val sid = TtsPacks.speakerId(book.language, snap.profile, voicePrefs.selectedSid(book.language))
-            // First audible chunk: hard-capped ~100 chars for faster TTFA.
-            // Later EN chunks stay modest (2 / ~400) for prosody without long waits.
+            // First audible chunk: hard-capped ~48 chars for faster TTFA.
+            // Later EN chunks: 1 sentence / ~160 so a prefetch miss stays short.
             val isFirst = firstChunkAfterRestart && sentenceRemainder == null
             if (firstChunkAfterRestart) firstChunkAfterRestart = false
 
@@ -286,20 +327,7 @@ class HanaPlayer(context: Context) {
                 list
             }
 
-            val maxSentences: Int
-            val maxChars: Int
-            if (book.language == "en") {
-                if (isFirst) {
-                    maxSentences = 1
-                    maxChars = TextUtil.FIRST_UTTERANCE_MAX_CHARS
-                } else {
-                    maxSentences = 2
-                    maxChars = 400
-                }
-            } else {
-                maxSentences = 2
-                maxChars = 320
-            }
+            val (maxSentences, maxChars) = chunkLimits(book.language, isFirst)
             val chunk = TextUtil.speakChunk(
                 effectiveList,
                 snap.sentenceIndex,
@@ -319,18 +347,29 @@ class HanaPlayer(context: Context) {
                 if (_state.value.playing) continueSpeaking()
                 return
             }
-            val remTag = if (chunk.remainder != null) "r" else "f"
-            val key = "hana-${snap.chapterIndex}-${snap.sentenceIndex}-c$consumed-$remTag-${text.length}"
-            val cached = if (prefetchKey == key) prefetch?.await() else null
+            val key = utterancePrefetchKey(
+                snap.chapterIndex,
+                snap.sentenceIndex,
+                consumed,
+                chunk.remainder != null,
+                text.length
+            )
+            val started = SystemClock.elapsedRealtime()
+            val cached = awaitPrefetchOrNull(key, waitingFirst = isFirst)
             prefetch?.cancel()
             prefetch = null
             prefetchKey = null
-            if (cached == null) {
-                _state.value = _state.value.copy(status = "Synthesizing…")
-            }
-            val started = SystemClock.elapsedRealtime()
-            val audio = cached ?: withContext(Dispatchers.Default) {
-                neural.synthesize(text, book.language, sid, speed)
+            val audio = if (cached != null) {
+                cached
+            } else {
+                val ticker = launchStatusTicker(isFirst)
+                try {
+                    withContext(Dispatchers.Default) {
+                        neural.synthesize(text, book.language, sid, speed)
+                    }
+                } finally {
+                    ticker.cancel()
+                }
             }
             val generateMs = SystemClock.elapsedRealtime() - started
             val audioMs = if (audio.sampleRate > 0) {
@@ -386,18 +425,15 @@ class HanaPlayer(context: Context) {
         val nextText: String
         val nextConsumed: Int
         val nextRemainder: String?
-        val remTag: String
         if (remainder != null) {
             val injected = list.toMutableList().also {
                 if (se in it.indices) it[se] = remainder
             }
-            val maxSentences = if (book.language == "en") 2 else 2
-            val maxChars = if (book.language == "en") 400 else 320
+            val (maxSentences, maxChars) = chunkLimits(book.language, isFirst = false)
             val next = TextUtil.speakChunk(injected, se, maxSentences, maxChars, isFirst = false)
             nextText = next.text
             nextConsumed = next.consumed
             nextRemainder = next.remainder
-            remTag = if (nextRemainder != null) "r" else "f"
         } else {
             se = snap.sentenceIndex + consumed
             if (se >= list.size) {
@@ -406,16 +442,14 @@ class HanaPlayer(context: Context) {
                 se = 0
                 list = sentences(book, ch)
             }
-            val maxSentences = if (book.language == "en") 2 else 2
-            val maxChars = if (book.language == "en") 400 else 320
+            val (maxSentences, maxChars) = chunkLimits(book.language, isFirst = false)
             val next = TextUtil.speakChunk(list, se, maxSentences, maxChars, isFirst = false)
             nextText = next.text
             nextConsumed = next.consumed
             nextRemainder = next.remainder
-            remTag = if (nextRemainder != null) "r" else "f"
         }
         if (nextText.isBlank() || (nextConsumed <= 0 && nextRemainder == null)) return
-        val key = "hana-$ch-$se-c$nextConsumed-$remTag-${nextText.length}"
+        val key = utterancePrefetchKey(ch, se, nextConsumed, nextRemainder != null, nextText.length)
         prefetchKey = key
         prefetch = scope.async(Dispatchers.Default) {
             runCatching { neural.synthesize(nextText, book.language, sid, speed) }.getOrNull()
@@ -454,6 +488,122 @@ class HanaPlayer(context: Context) {
         }
     }
 
+
+    private fun markNeuralReady() {
+        val playing = _state.value.playing
+        val keepStatus = playing && (
+            _state.value.status?.contains("Starting", true) == true ||
+                _state.value.status?.contains("Getting first", true) == true ||
+                _state.value.status?.contains("Synthesizing", true) == true ||
+                _state.value.status?.contains("Preparing", true) == true
+            )
+        _state.value = _state.value.copy(
+            usingNeural = true,
+            downloadProgress = null,
+            status = if (keepStatus) _state.value.status else "Neural voice ready"
+        )
+    }
+
+    /**
+     * While the user is still reading, synthesize the first hard-capped utterance
+     * into the shared prefetch slot so Listen often hits cache.
+     */
+    private suspend fun prebufferFirstUtterance(book: Book, chapterIndex: Int, sentenceIndex: Int) {
+        if (_state.value.profile != VoiceProfile.Hana) return
+        if (!neural.isLoaded(book.language)) return
+        if (_state.value.playing) return
+        val ch = chapterIndex.coerceAtLeast(0)
+        val se = sentenceIndex.coerceAtLeast(0)
+        val list = sentences(book, ch)
+        if (se !in list.indices) return
+        val planned = planFirstUtterance(ch, se, list) ?: return
+        if (prefetchKey == planned.key && prefetch?.isActive == true) return
+        if (prefetchKey == planned.key && prefetch?.isCompleted == true) return
+        prefetch?.cancel()
+        prefetchKey = planned.key
+        val sid = TtsPacks.speakerId(
+            book.language,
+            _state.value.profile,
+            voicePrefs.selectedSid(book.language)
+        )
+        val speed = _state.value.rate
+        val text = planned.chunk.text
+        Log.i(TAG, "prebuffer first chars=${text.length} key=${planned.key}")
+        prefetch = scope.async(Dispatchers.Default) {
+            runCatching { neural.synthesize(text, book.language, sid, speed) }.getOrNull()
+        }
+    }
+
+    private fun cancelMismatchedPrebuffer(book: Book, chapterIndex: Int, sentenceIndex: Int) {
+        val expected = firstUtterancePrefetchKey(book, chapterIndex, sentenceIndex)
+        if (expected == null || prefetchKey != expected) {
+            prefetch?.cancel()
+            prefetch = null
+            prefetchKey = null
+        }
+    }
+
+    private fun firstUtterancePrefetchKey(book: Book, chapterIndex: Int, sentenceIndex: Int): String? {
+        val list = sentences(book, chapterIndex)
+        return planFirstUtterance(chapterIndex, sentenceIndex, list)?.key
+    }
+
+    private suspend fun awaitPrefetchOrNull(key: String, waitingFirst: Boolean): PcmAudio? {
+        if (prefetchKey != key) return null
+        val deferred = prefetch ?: return null
+        if (deferred.isCompleted) return deferred.await()
+        // Prefetch still running (common after warmPrepare). Tick status after ~300ms.
+        if (_state.value.status.isNullOrBlank() || _state.value.status == "Neural voice ready") {
+            _state.value = _state.value.copy(status = "Starting…")
+        }
+        val ticker = scope.launch {
+            delay(PREBUFFER_FEEDBACK_MS)
+            var lastSec = -1
+            val t0 = SystemClock.elapsedRealtime()
+            while (true) {
+                val sec = ((SystemClock.elapsedRealtime() - t0) / 1000L).toInt()
+                if (sec != lastSec) {
+                    lastSec = sec
+                    val label = if (waitingFirst) {
+                        if (sec <= 0) "Getting first line…" else "Getting first line… ${sec}s"
+                    } else {
+                        if (sec <= 0) "Synthesizing…" else "Synthesizing… ${sec}s"
+                    }
+                    _state.value = _state.value.copy(status = label)
+                }
+                delay(STATUS_TICK_MS)
+            }
+        }
+        return try {
+            deferred.await()
+        } finally {
+            ticker.cancel()
+        }
+    }
+
+    private fun launchStatusTicker(isFirst: Boolean): Job {
+        val t0 = SystemClock.elapsedRealtime()
+        _state.value = _state.value.copy(
+            status = if (isFirst) "Getting first line…" else "Synthesizing…"
+        )
+        return scope.launch {
+            var lastSec = -1
+            while (true) {
+                delay(STATUS_TICK_MS)
+                val sec = ((SystemClock.elapsedRealtime() - t0) / 1000L).toInt()
+                if (sec != lastSec) {
+                    lastSec = sec
+                    val label = if (isFirst) {
+                        if (sec <= 0) "Getting first line…" else "Getting first line… ${sec}s"
+                    } else {
+                        if (sec <= 0) "Synthesizing…" else "Synthesizing… ${sec}s"
+                    }
+                    _state.value = _state.value.copy(status = label)
+                }
+            }
+        }
+    }
+
     private fun sentences(book: Book, chapterIndex: Int): List<String> {
         val body = book.chapters.getOrNull(chapterIndex)?.body.orEmpty()
         return TextUtil.splitSentences(body)
@@ -474,12 +624,65 @@ class HanaPlayer(context: Context) {
 
     companion object {
         private const val TAG = "HanaTts"
+        private const val STATUS_TICK_MS = 500L
+        private const val PREBUFFER_FEEDBACK_MS = 300L
+        /** EN later chunks: short so a prefetch miss is not a long stall. */
+        const val EN_LATER_MAX_SENTENCES = 1
+        const val EN_LATER_MAX_CHARS = 160
+        const val ID_LATER_MAX_SENTENCES = 2
+        const val ID_LATER_MAX_CHARS = 280
 
         @Volatile private var instance: HanaPlayer? = null
         fun get(context: Context): HanaPlayer {
             return instance ?: synchronized(this) {
                 instance ?: HanaPlayer(context.applicationContext).also { instance = it }
             }
+        }
+
+        fun chunkLimits(language: String, isFirst: Boolean): Pair<Int, Int> {
+            return when {
+                isFirst -> 1 to TextUtil.FIRST_UTTERANCE_MAX_CHARS
+                language == "en" -> EN_LATER_MAX_SENTENCES to EN_LATER_MAX_CHARS
+                else -> ID_LATER_MAX_SENTENCES to ID_LATER_MAX_CHARS
+            }
+        }
+
+        /** Same key scheme speakNeural / prefetchNext / prebuffer all use. */
+        fun utterancePrefetchKey(
+            chapterIndex: Int,
+            sentenceIndex: Int,
+            consumed: Int,
+            hasRemainder: Boolean,
+            textLength: Int
+        ): String {
+            val remTag = if (hasRemainder) "r" else "f"
+            return "hana-$chapterIndex-$sentenceIndex-c$consumed-$remTag-$textLength"
+        }
+
+        data class PlannedUtterance(val key: String, val chunk: TextUtil.SpeakChunkResult)
+
+        fun planFirstUtterance(
+            chapterIndex: Int,
+            sentenceIndex: Int,
+            sentences: List<String>
+        ): PlannedUtterance? {
+            if (sentenceIndex !in sentences.indices) return null
+            val chunk = TextUtil.speakChunk(
+                sentences,
+                sentenceIndex,
+                maxSentences = 1,
+                maxChars = TextUtil.FIRST_UTTERANCE_MAX_CHARS,
+                isFirst = true
+            )
+            if (chunk.text.isBlank()) return null
+            val key = utterancePrefetchKey(
+                chapterIndex,
+                sentenceIndex,
+                chunk.consumed,
+                chunk.remainder != null,
+                chunk.text.length
+            )
+            return PlannedUtterance(key, chunk)
         }
     }
 }
