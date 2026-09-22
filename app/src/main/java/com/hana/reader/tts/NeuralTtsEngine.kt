@@ -127,6 +127,8 @@ class NeuralTtsEngine {
                 provider = "cpu"
             )
         }
-        return OfflineTtsConfig(model = model, maxNumSentences = 1)
+        // Allow multi-sentence chunks from HanaPlayer for smoother English prosody.
+        val maxSentences = if (files.kind == NeuralKind.Kokoro) 4 else 2
+        return OfflineTtsConfig(model = model, maxNumSentences = maxSentences)
     }
 }

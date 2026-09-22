@@ -11,8 +11,10 @@ data class TtsPack(
 )
 
 object TtsPacks {
-    const val KOKORO_HANA_SID = 2 // af_nicole — breathy / soft for long listening
-    const val KOKORO_CLEAR_SID = 3 // af_sarah — brighter, more neutral
+    // kokoro-int8-en-v0_19 speaker map:
+    // 0 af, 1 af_bella, 2 af_nicole, 3 af_sarah, 4 af_sky, ...
+    const val KOKORO_HANA_SID = 1 // af_bella — warm narration, better for long ebook listening
+    const val KOKORO_CLEAR_SID = 3 // af_sarah — brighter / more neutral
     const val PIPER_SID = 0
 
     val EN = TtsPack(
