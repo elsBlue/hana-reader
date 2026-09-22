@@ -14,7 +14,7 @@ class TtsPacksTest {
         val pack = TtsPacks.forLanguage("en")!!
         assertEquals(NeuralKind.Kokoro, pack.kind)
         assertTrue(pack.url.endsWith("kokoro-int8-en-v0_19.tar.bz2"))
-        assertEquals(2, TtsPacks.speakerId("en", VoiceProfile.Hana))
+        assertEquals(1, TtsPacks.speakerId("en", VoiceProfile.Hana)) // af_bella
         assertEquals(3, TtsPacks.speakerId("en", VoiceProfile.Clear))
     }
 
