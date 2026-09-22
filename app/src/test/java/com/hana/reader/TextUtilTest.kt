@@ -2,6 +2,7 @@ package com.hana.reader
 
 import com.hana.reader.data.TextUtil
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -79,6 +80,10 @@ class TextUtilTest {
             )
             isFirst = false
             assertTrue(chunk.text.isNotBlank())
+            assertTrue(
+                "chunk must not end mid-word: '${chunk.text.takeLast(12)}'",
+                TextUtil.endsAtWordBoundary(chunk.text, effective[start])
+            )
             if (chunk.remainder != null) {
                 assertTrue(
                     "first/hard-capped piece must stay near cap",
@@ -109,8 +114,8 @@ class TextUtilTest {
 
     @Test
     fun hardCapPrefersClausePunctuation() {
-        // Comma must sit after minKeep (~cap/3) and before the 48-char cap.
-        val text = "Short words grow here, then this long tail continues well past the forty eight character hard cap for sure."
+        // Comma must sit after minKeep (~cap/3) and before the 64-char cap.
+        val text = "Short words grow here, then this long tail continues well past the sixty four character hard cap for sure and more."
         assertTrue(text.length > TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         val commaAt = text.indexOf(',')
         assertTrue("comma should be after minKeep", commaAt >= TextUtil.FIRST_UTTERANCE_MAX_CHARS / 3)
@@ -126,8 +131,59 @@ class TextUtilTest {
     }
 
     @Test
-    fun firstUtteranceMaxCharsIsFortyEight() {
-        assertEquals(48, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
+    fun hardCapNeverSplitsMidWordForEbookSentences() {
+        val samples = listOf(
+            "The boat began to drift along the quiet canal at sunrise.",
+            "She could only listen while the distant bells kept ringing.",
+            "A purple haze settled over the fields beyond the village.",
+            "In the beginning of this rather lengthy chapter the narrator explains the setting with unusual care and patience while the hero waits.",
+            "Words without commas or breaks just keep going and going past sixty four characters into the next clause of the tale."
+        )
+        for (sentence in samples) {
+            assertTrue(sentence.length > 20)
+            val (prefix, rest) = TextUtil.hardCapUtterance(sentence, TextUtil.EN_CHUNK_MAX_CHARS)
+            assertTrue(prefix.isNotBlank())
+            assertTrue(
+                "must not end mid-word like 'drif'/'li'/'pur': '$prefix'",
+                TextUtil.endsAtWordBoundary(prefix, sentence)
+            )
+            // Classic mid-word truncations from the screen recording
+            assertFalse("must not end with truncated 'drif'", prefix.endsWith("drif"))
+            assertFalse("must not end with truncated 'pur'", Regex("\\bpur$").containsMatchIn(prefix))
+            if (rest != null) {
+                assertEquals(
+                    TextUtil.normalizeForTts(sentence),
+                    TextUtil.normalizeForTts("$prefix $rest")
+                )
+                // Rest continuing a letter after a letter ⇒ mid-word (should not happen)
+                if (prefix.last().isLetter() && rest.first().isLetter()) {
+                    val orig = TextUtil.normalizeForTts(sentence)
+                    val idx = prefix.length
+                    assertTrue(
+                        "gap between prefix and rest should be whitespace in original",
+                        idx < orig.length && orig[idx].isWhitespace()
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun hardCapLastResortOnlyForSingleLongToken() {
+        val token = "a".repeat(80)
+        val (prefix, rest) = TextUtil.hardCapUtterance(token, 64)
+        assertEquals(64, prefix.length)
+        assertNotNull(rest)
+        assertEquals(token, prefix + rest)
+    }
+
+    @Test
+    fun enChunkMaxCharsIsSixtyFour() {
+        assertEquals(64, TextUtil.EN_CHUNK_MAX_CHARS)
+        assertEquals(64, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
+        assertEquals(64, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS)
+        assertEquals(1, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_SENTENCES)
+        assertEquals(2, com.hana.reader.tts.HanaPlayer.QUEUE_DEPTH)
     }
 
     @Test
@@ -158,9 +214,65 @@ class TextUtilTest {
         )
         assertEquals(expectedKey, planned.key)
         assertTrue(
-            "first utterance must stay near 48-char cap, was ${chunk.text.length}",
+            "first utterance must stay near ${TextUtil.FIRST_UTTERANCE_MAX_CHARS}-char cap, was ${chunk.text.length}",
             chunk.text.length <= TextUtil.FIRST_UTTERANCE_MAX_CHARS + 5
         )
         assertNotNull("long first sentence should leave a remainder", chunk.remainder)
+    }
+
+    @Test
+    fun lookaheadPlanKeepsDepthAndStableKeys() {
+        val chapter = listOf(
+            "The boat began to drift along the quiet canal at sunrise while birds called.",
+            "She could only listen while the distant bells kept ringing across the valley.",
+            "A purple haze settled over the fields beyond the village green."
+        )
+        val planned = com.hana.reader.tts.HanaPlayer.planLookahead(
+            chapterSentences = listOf(chapter),
+            chapterIndex = 0,
+            sentenceIndex = 0,
+            remainder = null,
+            language = "en",
+            isFirst = true,
+            count = 3
+        )
+        assertTrue("expected depth >= 2, got ${planned.size}", planned.size >= 2)
+        // Keys must be unique and rebuild-stable
+        val keys = planned.map { it.key }
+        assertEquals(keys.toSet().size, keys.size)
+        for (p in planned) {
+            assertTrue(p.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
+            assertTrue(
+                "lookahead chunk must not end mid-word: '${p.text.takeLast(16)}'",
+                p.text.last().isWhitespace() ||
+                    p.text.last() in ".,;:!?—–" ||
+                    !p.text.last().isLetterOrDigit() ||
+                    p.remainder == null ||
+                    TextUtil.endsAtWordBoundary(p.text, p.text + " " + (p.remainder ?: ""))
+            )
+        }
+        // Re-plan from same cursor → identical first key (prefetch stability)
+        val again = com.hana.reader.tts.HanaPlayer.planLookahead(
+            chapterSentences = listOf(chapter),
+            chapterIndex = 0,
+            sentenceIndex = 0,
+            remainder = null,
+            language = "en",
+            isFirst = true,
+            count = 1
+        )
+        assertEquals(planned.first().key, again.first().key)
+        assertEquals(planned.first().text, again.first().text)
+    }
+
+    @Test
+    fun firstAndLaterEnChunksShareBudget() {
+        val long = "Words without commas just keep going past the continuous english budget into another phrase of the story here."
+        val first = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = 64, isFirst = true)
+        val later = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = TextUtil.EN_CHUNK_MAX_CHARS, isFirst = false)
+        assertTrue(first.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
+        assertTrue(later.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
+        // Same budget → same hard-cap for a single long sentence
+        assertEquals(first.text, later.text)
     }
 }
