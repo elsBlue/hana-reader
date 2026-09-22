@@ -36,6 +36,7 @@ class HanaPlayer(context: Context) {
     private val appContext = context.applicationContext
     private val store = ProgressStore(appContext)
     private val models = TtsModelManager(appContext)
+    private val voicePrefs = VoicePrefs(appContext)
     private val system = SystemTtsEngine(appContext)
     private val neural = NeuralTtsEngine()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -133,6 +134,10 @@ class HanaPlayer(context: Context) {
         _state.value = _state.value.copy(rate = r)
         system.setRate(r)
     }
+
+    fun voicePreferences(): VoicePrefs = voicePrefs
+    fun modelManager(): TtsModelManager = models
+    fun neuralEngine(): NeuralTtsEngine = neural
 
     fun shutdown() {
         pause()
@@ -238,7 +243,7 @@ class HanaPlayer(context: Context) {
     private suspend fun speakNeural(book: Book, list: List<String>, snap: PlayerSnapshot) {
         try {
             val speed = snap.rate
-            val sid = TtsPacks.speakerId(book.language, snap.profile)
+            val sid = TtsPacks.speakerId(book.language, snap.profile, voicePrefs.selectedSid(book.language))
             val maxSentences = if (book.language == "en") 3 else 2
             val maxChars = if (book.language == "en") 500 else 320
             val (text, consumed) = TextUtil.speakChunk(

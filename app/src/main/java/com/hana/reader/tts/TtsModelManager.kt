@@ -68,6 +68,16 @@ class TtsModelManager(context: Context) {
         return ready.readText().trim() == pack.packId
     }
 
+    fun deletePack(language: String) {
+        langDir(language).deleteRecursively()
+    }
+
+    fun installedBytes(language: String): Long {
+        val dir = langDir(language)
+        if (!dir.isDirectory) return 0L
+        return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
     private fun langDir(language: String) = File(root, language)
 
     private fun download(url: String, dest: File, minBytes: Long, onProgress: (Float) -> Unit) {

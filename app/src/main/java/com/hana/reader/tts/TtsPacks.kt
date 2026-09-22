@@ -51,14 +51,20 @@ object TtsPacks {
         else -> null
     }
 
-    fun speakerId(language: String, profile: VoiceProfile): Int {
+    fun speakerId(language: String, profile: VoiceProfile, selectedSid: Int? = null): Int {
+        if (profile != VoiceProfile.Hana) {
+            return if (language == "id") PIPER_SID else KOKORO_CLEAR_SID
+        }
         if (language == "id") return PIPER_SID
-        return if (profile == VoiceProfile.Hana) KOKORO_HANA_SID else KOKORO_CLEAR_SID
+        return selectedSid ?: KOKORO_HANA_SID
     }
 
-    fun voiceName(language: String, profile: VoiceProfile): String {
-        if (language == "id") return "news"
-        return if (profile == VoiceProfile.Hana) KOKORO_VOICE_HANA else KOKORO_VOICE_CLEAR
+    fun voiceName(language: String, profile: VoiceProfile, selectedId: String? = null): String {
+        if (profile != VoiceProfile.Hana) {
+            return if (language == "id") "news" else KOKORO_VOICE_CLEAR
+        }
+        if (selectedId != null) return VoiceCatalog.find(selectedId)?.name ?: selectedId
+        return if (language == "id") "news" else KOKORO_VOICE_HANA
     }
 
     /** Short label for the mini player: what is speaking + how to switch. */
@@ -67,18 +73,23 @@ object TtsPacks {
         profile: VoiceProfile,
         usingNeural: Boolean,
         downloading: Boolean,
-        status: String?
+        status: String?,
+        selectedVoiceName: String? = null
     ): String {
         if (downloading) return status ?: "Downloading voice…"
         return when {
             profile == VoiceProfile.Hana && usingNeural -> {
                 val pack = forLanguage(language)
                 val engine = pack?.displayName ?: "Neural"
-                val voice = voiceName(language, profile)
+                val voice = selectedVoiceName ?: voiceName(language, profile)
                 "$engine · $voice · tap = system"
             }
             profile == VoiceProfile.Hana && !usingNeural -> {
-                val why = status?.takeIf { it.isNotBlank() && !it.equals("Hana voice ready", true) }
+                val why = status?.takeIf {
+                    it.isNotBlank() &&
+                        !it.equals("Neural voice ready", true) &&
+                        !it.equals("Hana voice ready", true)
+                }
                 if (why != null && why.contains("device", ignoreCase = true).not()) {
                     "System voice · $why · tap = retry Hana"
                 } else {
