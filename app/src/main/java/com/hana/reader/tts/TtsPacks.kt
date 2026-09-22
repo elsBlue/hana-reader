@@ -114,7 +114,8 @@ object TtsPacks {
             status.contains("Synthesizing", ignoreCase = true) ||
             status.contains("Loading", ignoreCase = true) ||
             status.contains("Starting", ignoreCase = true) ||
-            status.contains("Getting first", ignoreCase = true)
+            status.contains("Getting first", ignoreCase = true) ||
+            status.contains("Slow on this phone", ignoreCase = true)
         )) {
             return status
         }

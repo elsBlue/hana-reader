@@ -294,4 +294,42 @@ class TextUtilTest {
         )
         assertEquals(1 to 64, kokoroLater)
     }
+
+    @Test
+    fun preserveLookaheadWhenFirstLineIsQueuedOrInFlight() {
+        val key = com.hana.reader.tts.HanaPlayer.utterancePrefetchKey(0, 0, 1, false, 40)
+        assertTrue(
+            com.hana.reader.tts.HanaPlayer.shouldPreserveLookahead(
+                packMatches = true,
+                firstKey = key,
+                queueHeadKey = key,
+                reservedKeys = emptySet()
+            )
+        )
+        assertTrue(
+            "Listen must not discard a first line already synthesizing",
+            com.hana.reader.tts.HanaPlayer.shouldPreserveLookahead(
+                packMatches = true,
+                firstKey = key,
+                queueHeadKey = null,
+                reservedKeys = setOf(key)
+            )
+        )
+        assertFalse(
+            com.hana.reader.tts.HanaPlayer.shouldPreserveLookahead(
+                packMatches = true,
+                firstKey = key,
+                queueHeadKey = null,
+                reservedKeys = emptySet()
+            )
+        )
+        assertFalse(
+            com.hana.reader.tts.HanaPlayer.shouldPreserveLookahead(
+                packMatches = false,
+                firstKey = key,
+                queueHeadKey = key,
+                reservedKeys = setOf(key)
+            )
+        )
+    }
 }

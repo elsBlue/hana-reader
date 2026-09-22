@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicInteger
 
 enum class VoiceProfile { Hana, Clear }
 
@@ -59,6 +60,12 @@ class HanaPlayer(context: Context) {
     private var sentenceRemainder: String? = null
     /** Pack that produced the current lookahead queue — drop queue on voice/pack change. */
     private var queuePackId: String? = null
+    /** Keys currently being synthesized (prebuffer / fill / inline). */
+    private val reservedKeys = mutableSetOf<String>()
+    @Volatile private var reservedSnapshot: Set<String> = emptySet()
+    @Volatile private var headKeySnapshot: String? = null
+    /** Bumped when the queue is discarded so in-flight synth results are dropped. */
+    private val synthEpoch = AtomicInteger(0)
 
     fun play(book: Book, chapterIndex: Int? = null, sentenceIndex: Int? = null) {
         val saved = store.get(book.id)
@@ -202,18 +209,28 @@ class HanaPlayer(context: Context) {
 
     private fun restartSpeak(prepare: Boolean) {
         speakJob?.cancel()
-        // Preserve lookahead when Listen resumes at the same first-utterance key
-        // (warmPrepare / Reader open prebuffer). Drop on seek / mismatch.
-        // Intentionally stop audio here; normal chunk advance must NOT call stop().
+        // Preserve in-flight first line (prebuffer / fill) when Listen is tapped
+        // at the same position. Clearing it forces a second 10s synth.
         val bookNow = _state.value.book
-        val keep = bookNow != null &&
-            queueHeadMatchesFirst(bookNow) &&
-            queuePackId == activePack(bookNow.language).packId
+        val plannedFirst = bookNow?.let {
+            planFirstUtterance(
+                _state.value.chapterIndex,
+                _state.value.sentenceIndex,
+                sentences(it, _state.value.chapterIndex),
+                language = it.language,
+                kind = activePack(it.language).kind
+            )
+        }
+        val packMatches = bookNow != null &&
+            (queuePackId == null || queuePackId == activePack(bookNow.language).packId)
+        val keep = shouldPreserveLookahead(
+            packMatches = packMatches,
+            firstKey = plannedFirst?.key,
+            queueHeadKey = headKeySnapshot,
+            reservedKeys = reservedSnapshot
+        )
         if (!keep) {
             clearReadyQueue()
-        } else {
-            fillJob?.cancel()
-            fillJob = null
         }
         sentenceRemainder = null
         firstChunkAfterRestart = true
@@ -327,28 +344,12 @@ class HanaPlayer(context: Context) {
             val isFirst = firstChunkAfterRestart && sentenceRemainder == null
             if (firstChunkAfterRestart) firstChunkAfterRestart = false
 
-            val starved = queueMutex.withLock { readyQueue.isEmpty() }
-
-            // First audible chunk as soon as one is ready — do not wait for a full queue.
-            val head = ensureQueueHead(book, snap, sid, speed, isFirst) ?: run {
+            // One synth pipeline: fill (or prebuffer) owns generate; play waits for it.
+            kickQueueFill(book, sid, speed)
+            val head = awaitPlayableHead(book, snap, sid, speed, isFirst) ?: run {
                 advance(1)
                 return
             }
-
-            // Mid-listen starve: one wait, refill a couple of chunks, then keep streaming.
-            if (!isFirst && starved) {
-                val refillTicker = launchStatusTicker(isFirst = false)
-                try {
-                    while (readyQueue.size < (PLAY_RESUME_DEPTH - 1).coerceAtLeast(1) && _state.value.playing) {
-                        val added = topUpOne(book, sid, speed) ?: break
-                        if (!added) break
-                    }
-                } finally {
-                    refillTicker.cancel()
-                }
-            }
-
-            kickQueueFill(book, sid, speed)
 
             sentenceRemainder = head.remainder
             val text = head.text
@@ -367,8 +368,14 @@ class HanaPlayer(context: Context) {
                     "queueHit=${!head.synthesizedInline} queueSize=${readyQueue.size} first=$isFirst " +
                     "pack=${activePack(book.language).packId}"
             )
-            _state.value = _state.value.copy(status = null)
-            // Persistent stream — never stop/recreate the track between chunks (cuts mid-word).
+            val pack = activePack(book.language)
+            val hint = if (rtf >= 1.15 && pack.kind == NeuralKind.Kokoro) {
+                "Slow on this phone — Voices → Smooth"
+            } else {
+                null
+            }
+            _state.value = _state.value.copy(status = hint)
+            kickQueueFill(book, sid, speed)
             withContext(Dispatchers.IO) { neural.writeStreaming(audio) }
             if (_state.value.playing) {
                 if (head.remainder != null) {
@@ -395,60 +402,86 @@ class HanaPlayer(context: Context) {
     }
 
     /**
-     * Take queue head if it matches the current speak position; otherwise rebuild
-     * and synthesize. Status is only shown when the listener would hear silence.
+     * Take the current chunk if it is already queued; otherwise wait for an
+     * in-flight synth (prebuffer / fill) instead of generating the same text again.
      */
-    private suspend fun ensureQueueHead(
+    private suspend fun awaitPlayableHead(
         book: Book,
         snap: PlayerSnapshot,
         sid: Int,
         speed: Float,
         isFirst: Boolean
     ): ReadyChunk? {
-        queueMutex.withLock {
-            val expectedKey = currentPositionKey(book, snap, isFirst)
-            val peek = readyQueue.peekFirst()
-            if (peek != null && expectedKey != null && peek.key == expectedKey) {
-                return readyQueue.removeFirst()
+        val expectedKey = currentPositionKey(book, snap, isFirst) ?: return null
+        takeMatchingHead(expectedKey)?.let { return it }
+
+        val ticker = launchStatusTicker(isFirst)
+        try {
+            val deadline = SystemClock.elapsedRealtime() + 45_000L
+            var launchedInline = false
+            while (_state.value.playing && SystemClock.elapsedRealtime() < deadline) {
+                takeMatchingHead(expectedKey)?.let { return it }
+
+                val someoneElseOwns = queueMutex.withLock { expectedKey in reservedKeys }
+                if (!someoneElseOwns && !launchedInline) {
+                    val planned = planAtCurrent(book, snap, isFirst) ?: return null
+                    val claimed = queueMutex.withLock {
+                        if (expectedKey in reservedKeys) {
+                            false
+                        } else {
+                            reservedKeys.add(expectedKey)
+                            if (queueTail == null) queueTail = advanceCursor(book, planned)
+                            publishQueueSnapshots()
+                            true
+                        }
+                    }
+                    if (claimed) {
+                        launchedInline = true
+                        val epoch = synthEpoch.get()
+                        val t0 = SystemClock.elapsedRealtime()
+                        val audio = withContext(Dispatchers.Default) {
+                            neural.synthesize(planned.text, book.language, sid, speed)
+                        }
+                        queueMutex.withLock {
+                            reservedKeys.remove(expectedKey)
+                            publishQueueSnapshots()
+                        }
+                        if (epoch != synthEpoch.get() || !_state.value.playing) return null
+                        return ReadyChunk(
+                            key = planned.key,
+                            text = planned.text,
+                            chapterIndex = planned.chapterIndex,
+                            sentenceIndex = planned.sentenceIndex,
+                            consumed = planned.consumed,
+                            remainder = planned.remainder,
+                            audio = audio,
+                            generateMs = SystemClock.elapsedRealtime() - t0,
+                            synthesizedInline = true
+                        )
+                    }
+                }
+                delay(40)
             }
-            if (peek != null && expectedKey == null) {
-                // Blank / unplanned — drop stale queue.
-                readyQueue.clear()
-                queueTail = null
-            } else if (peek != null) {
-                // Key mismatch — discard stale lookahead and resynth from live position.
+            return takeMatchingHead(expectedKey)
+        } finally {
+            ticker.cancel()
+        }
+    }
+
+    private suspend fun takeMatchingHead(expectedKey: String): ReadyChunk? {
+        return queueMutex.withLock {
+            val peek = readyQueue.peekFirst() ?: return@withLock null
+            if (peek.key != expectedKey) {
+                // Current line may still be in-flight; don't throw away later chunks.
+                if (expectedKey in reservedKeys) return@withLock null
                 Log.w(TAG, "queue key miss want=$expectedKey have=${peek.key}")
                 readyQueue.clear()
                 queueTail = null
+                reservedKeys.clear()
+                publishQueueSnapshots()
+                return@withLock null
             }
-        }
-
-        // Queue empty: synthesize current chunk inline (status visible).
-        val planned = planAtCurrent(book, snap, isFirst) ?: return null
-        val ticker = launchStatusTicker(isFirst)
-        val t0 = SystemClock.elapsedRealtime()
-        return try {
-            val audio = withContext(Dispatchers.Default) {
-                neural.synthesize(planned.text, book.language, sid, speed)
-            }
-            val chunk = ReadyChunk(
-                key = planned.key,
-                text = planned.text,
-                chapterIndex = planned.chapterIndex,
-                sentenceIndex = planned.sentenceIndex,
-                consumed = planned.consumed,
-                remainder = planned.remainder,
-                audio = audio,
-                generateMs = SystemClock.elapsedRealtime() - t0,
-                synthesizedInline = true
-            )
-            queueMutex.withLock {
-                // Tail starts after this chunk so fill can continue.
-                queueTail = advanceCursor(book, planned)
-            }
-            chunk
-        } finally {
-            ticker.cancel()
+            readyQueue.removeFirst().also { publishQueueSnapshots() }
         }
     }
 
@@ -471,6 +504,7 @@ class HanaPlayer(context: Context) {
     /** @return true if a chunk was enqueued, false if nothing left / stopped, null on error skip */
     private suspend fun topUpOne(book: Book, sid: Int, speed: Float): Boolean? {
         val plan: PlannedChunk
+        val epoch = synthEpoch.get()
         queueMutex.withLock {
             if (readyQueue.size >= QUEUE_DEPTH) return false
             val cursor = queueTail ?: QueueCursor(
@@ -482,18 +516,30 @@ class HanaPlayer(context: Context) {
             val next = planFromCursor(book, cursor) ?: run {
                 return false
             }
-            // Reserve slot by advancing tail before synth so concurrent fills don't duplicate.
             if (readyQueue.any { it.key == next.key }) {
                 queueTail = advanceCursor(book, next)
+                publishQueueSnapshots()
                 return true
             }
+            if (next.key in reservedKeys) {
+                return true
+            }
+            reservedKeys.add(next.key)
             queueTail = advanceCursor(book, next)
+            queuePackId = activePack(book.language).packId
+            publishQueueSnapshots()
             plan = next
         }
         val t0 = SystemClock.elapsedRealtime()
         val audio = runCatching {
             neural.synthesize(plan.text, book.language, sid, speed)
-        }.getOrNull() ?: return null
+        }.getOrNull()
+        queueMutex.withLock {
+            reservedKeys.remove(plan.key)
+            publishQueueSnapshots()
+        }
+        if (audio == null) return null
+        if (epoch != synthEpoch.get()) return false
         val chunk = ReadyChunk(
             key = plan.key,
             text = plan.text,
@@ -506,10 +552,10 @@ class HanaPlayer(context: Context) {
             synthesizedInline = false
         )
         queueMutex.withLock {
-            // Only enqueue if still relevant (tail still past this plan).
-            if (!_state.value.playing && readyQueue.size >= QUEUE_DEPTH) return false
+            if (epoch != synthEpoch.get()) return false
             readyQueue.addLast(chunk)
             queuePackId = activePack(book.language).packId
+            publishQueueSnapshots()
         }
         return true
     }
@@ -587,9 +633,16 @@ class HanaPlayer(context: Context) {
             ) ?: return
             val head = readyQueue.peekFirst()
             if (head != null && head.key == planned.key && readyQueue.size >= QUEUE_DEPTH) return
+            if (reservedKeys.contains(planned.key) && (head == null || head.key == planned.key)) {
+                return
+            }
             if (head == null || head.key != planned.key) {
+                synthEpoch.incrementAndGet()
                 readyQueue.clear()
+                reservedKeys.clear()
                 queueTail = QueueCursor(ch, se, remainder = null, isFirst = true)
+                queuePackId = activePack(book.language).packId
+                publishQueueSnapshots()
             }
         }
 
@@ -609,23 +662,19 @@ class HanaPlayer(context: Context) {
     }
 
     private fun clearReadyQueue() {
+        synthEpoch.incrementAndGet()
         fillJob?.cancel()
         fillJob = null
         readyQueue.clear()
         queueTail = null
         queuePackId = null
+        reservedKeys.clear()
+        publishQueueSnapshots()
     }
 
-    private fun queueHeadMatchesFirst(book: Book): Boolean {
-        val planned = planFirstUtterance(
-            _state.value.chapterIndex,
-            _state.value.sentenceIndex,
-            sentences(book, _state.value.chapterIndex),
-            language = book.language,
-            kind = activePack(book.language).kind
-        ) ?: return false
-        val head = readyQueue.peekFirst() ?: return false
-        return head.key == planned.key
+    private fun publishQueueSnapshots() {
+        reservedSnapshot = reservedKeys.toSet()
+        headKeySnapshot = readyQueue.peekFirst()?.key
     }
 
     private fun currentPositionKey(book: Book, snap: PlayerSnapshot, isFirst: Boolean): String? {
@@ -783,7 +832,7 @@ class HanaPlayer(context: Context) {
         private const val STATUS_TICK_MS = 500L
         /** Lookahead depth: keep this many synthesized chunks ready ahead of play. */
         const val QUEUE_DEPTH = 4
-        /** After a starve, wait until this many chunks exist before resuming audio. */
+        /** After a starve, fill aims to have this many extra chunks ready. */
         const val PLAY_RESUME_DEPTH = 2
         /** EN continuous: 1 sentence / ~64 chars for first and later (RTF keep-up). */
         const val EN_LATER_MAX_SENTENCES = 1
@@ -823,6 +872,17 @@ class HanaPlayer(context: Context) {
         ): String {
             val remTag = if (hasRemainder) "r" else "f"
             return "hana-$chapterIndex-$sentenceIndex-c$consumed-$remTag-$textLength"
+        }
+
+        fun shouldPreserveLookahead(
+            packMatches: Boolean,
+            firstKey: String?,
+            queueHeadKey: String?,
+            reservedKeys: Set<String>
+        ): Boolean {
+            if (!packMatches || firstKey.isNullOrEmpty()) return false
+            if (queueHeadKey == firstKey) return true
+            return firstKey in reservedKeys
         }
 
         data class PlannedChunk(
