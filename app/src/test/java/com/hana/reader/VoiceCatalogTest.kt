@@ -2,6 +2,7 @@ package com.hana.reader
 
 import com.hana.reader.tts.TtsPacks
 import com.hana.reader.tts.VoiceCatalog
+import com.hana.reader.tts.VoiceDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -24,25 +25,34 @@ class VoiceCatalogTest {
 
     @Test
     fun comfortDefaultMigratesFactoryBellaToSmooth() {
-        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.defaultId("en"))
-        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.englishIdAfterComfortMigration(null))
-        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.englishIdAfterComfortMigration("af_bella"))
-        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.englishIdAfterComfortMigration("en_lessac"))
-        assertEquals("id_news", com.hana.reader.tts.VoiceDefaults.defaultId("id"))
+        assertEquals("en_lessac", VoiceDefaults.defaultId("en"))
+        assertEquals("en_lessac", VoiceDefaults.englishIdAfterComfortMigration(null))
+        assertEquals("en_lessac", VoiceDefaults.englishIdAfterComfortMigration("af_bella"))
+        assertEquals("en_lessac", VoiceDefaults.englishIdAfterComfortMigration("en_lessac"))
+        assertEquals("id_cerita", VoiceDefaults.defaultId("id"))
     }
 
     @Test
     fun leftoverKokoroWarmVoicesMapToAmy() {
-        assertEquals("en_amy", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("af_bella"))
-        assertEquals("en_amy", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("af_nicole"))
-        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("am_adam"))
-        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.resolveEnglishId(null))
-        assertEquals("en_amy", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("en_amy"))
+        assertEquals("en_amy", VoiceDefaults.resolveEnglishId("af_bella"))
+        assertEquals("en_amy", VoiceDefaults.resolveEnglishId("af_nicole"))
+        assertEquals("en_lessac", VoiceDefaults.resolveEnglishId("am_adam"))
+        assertEquals("en_lessac", VoiceDefaults.resolveEnglishId(null))
+        assertEquals("en_amy", VoiceDefaults.resolveEnglishId("en_amy"))
     }
 
     @Test
-    fun indonesianNewsRemains() {
-        assertEquals("id_news", VoiceCatalog.INDONESIAN.first().id)
-        assertEquals(0, VoiceCatalog.INDONESIAN.first().sid)
+    fun indonesianIsCeritaNotNewsLabel() {
+        val id = VoiceCatalog.INDONESIAN.first()
+        assertEquals("id_cerita", id.id)
+        assertEquals("Cerita", id.label)
+        assertEquals(0, id.sid)
+        assertEquals(TtsPacks.ID.packId, id.packId)
+        assertTrue(id.traits.contains("storytelling", ignoreCase = true))
+        // Legacy prefs id still resolves to the same soft voice.
+        assertEquals("id_cerita", VoiceCatalog.find("id_news")!!.id)
+        assertEquals("id_cerita", VoiceCatalog.canonicalId("id_news"))
+        assertEquals("id_cerita", VoiceDefaults.indonesianIdAfterCeritaMigration("id_news"))
+        assertEquals("id_cerita", VoiceDefaults.indonesianIdAfterCeritaMigration(null))
     }
 }

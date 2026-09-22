@@ -27,6 +27,7 @@ class VoiceSwitchLogicTest {
         assertEquals(TtsPacks.EN_WARM, TtsPacks.packForVoice("en_amy"))
         assertEquals(TtsPacks.EN_WARM.storageKey, TtsPacks.packForVoice("en_amy")!!.storageKey)
         assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_news"))
+        assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_cerita"))
     }
 
 

@@ -144,7 +144,7 @@ fun VoicesScreen(nav: NavHostController) {
         }
 
         Text(
-            "Smooth is slower now so you can follow. Warm keeps the commas. Indonesian too.",
+            "Smooth is slower now so you can follow. Warm keeps the commas. Cerita is soft offline Indonesian.",
             color = Muted,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
@@ -282,7 +282,7 @@ private fun PackCard(
     val blurb = when (pack.packId) {
         TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · slower, with pauses"
         TtsPacks.EN_WARM.packId -> "Piper Amy · ~64 MB · softer, commas kept"
-        else -> "Piper news · ~63 MB · slower, with pauses"
+        else -> "Piper · ~63 MB · soft storytelling (Cerita)"
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
