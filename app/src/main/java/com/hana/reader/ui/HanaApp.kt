@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -103,6 +104,7 @@ fun HanaApp() {
             Box(Modifier.fillMaxSize().background(Paper)) {
                 NavHost(navController = nav, startDestination = "library") {
                     composable("library") { LibraryScreen(store, nav, session.email) }
+                    composable("voices") { VoicesScreen(nav) }
                     composable("read/{id}") { entry ->
                         val id = entry.arguments?.getString("id").orEmpty()
                         val book = store.book(id)
@@ -228,6 +230,9 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                     color = Ink
                 )
             }
+            IconButton(onClick = { nav.navigate("voices") }) {
+                Icon(Icons.Default.RecordVoiceOver, contentDescription = "Voices", tint = Ink)
+            }
             IconButton(onClick = {
                 picker.launch(arrayOf(
                     "application/epub+zip",
@@ -240,7 +245,7 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
             }
         }
         Text(
-            "EPUB, TXT, or Markdown",
+            "EPUB, TXT, or Markdown · Voices icon to manage packs",
             color = Muted,
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 4.dp)
@@ -410,12 +415,14 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
             Column(Modifier.weight(1f)) {
                 Text(book.title, maxLines = 1, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 val lang = book.language
+                val selectedVoice = HanaPlayer.get(LocalContext.current).voicePreferences().selectedVoice(lang)
                 val caption = TtsPacks.playerCaption(
                     language = lang,
                     profile = snap.profile,
                     usingNeural = snap.usingNeural,
                     downloading = snap.downloadProgress != null,
-                    status = snap.status
+                    status = snap.status,
+                    selectedVoiceName = selectedVoice?.name
                 )
                 Text(
                     caption,
@@ -424,6 +431,7 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable {
+                        // Short tap: toggle Hana/system. Open Voices from Library icon.
                         player.setProfile(
                             if (snap.profile == VoiceProfile.Hana) VoiceProfile.Clear else VoiceProfile.Hana
                         )
