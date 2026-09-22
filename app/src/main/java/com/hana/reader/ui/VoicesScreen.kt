@@ -138,7 +138,7 @@ fun VoicesScreen(nav: NavHostController) {
         }
 
         Text(
-            "Download a pack once, then pick a voice. Smooth is the continuous English listen when Kokoro feels slow.",
+            "Smooth is the default English listen — it starts sooner. Bella is warmer but can pause.",
             color = Muted,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
@@ -284,7 +284,7 @@ private fun PackCard(
 ) {
     val blurb = when (pack.packId) {
         TtsPacks.EN.packId -> "Kokoro fp32 · ~300 MB · warmer voice, slower on some phones"
-        TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · continuous listen, fewer gaps"
+        TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · default listen, fewer waits"
         else -> "Piper news · ~63 MB · offline after download"
     }
     Surface(
