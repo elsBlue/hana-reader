@@ -11,8 +11,7 @@ class SystemTtsEngine(context: Context) : TtsEngine, TextToSpeech.OnInitListener
     private val tts = TextToSpeech(context.applicationContext, this)
     @Volatile private var ready = false
     @Volatile private var onDone: (() -> Unit)? = null
-    private var rate = 0.9f
-    private var pitch = 1.05f
+    private var rate = TtsPacks.DEFAULT_RATE
 
     override fun onInit(status: Int) {
         ready = status == TextToSpeech.SUCCESS
@@ -44,8 +43,9 @@ class SystemTtsEngine(context: Context) : TtsEngine, TextToSpeech.OnInitListener
         val loc = if (language == "id") Locale("id", "ID") else Locale.US
         tts.language = loc
         pickWarmFemale(loc)?.let { tts.voice = it }
-        tts.setSpeechRate(if (hanaStyle) rate * 0.96f else rate)
-        tts.setPitch(if (hanaStyle) pitch else 1.0f)
+        // Pitch boost made "Hana · device" worse than plain Device — keep pitch natural.
+        tts.setPitch(1.0f)
+        tts.setSpeechRate(if (hanaStyle) rate * 0.98f else rate)
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
     }
 
@@ -54,7 +54,7 @@ class SystemTtsEngine(context: Context) : TtsEngine, TextToSpeech.OnInitListener
     }
 
     override fun setPitch(pitch: Float) {
-        this.pitch = pitch
+        // Ignored for system voice — pitch tweaks sounded worse than stock Google TTS.
     }
 
     override fun stop() {

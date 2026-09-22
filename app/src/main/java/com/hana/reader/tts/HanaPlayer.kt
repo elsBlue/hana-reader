@@ -26,7 +26,7 @@ data class PlayerSnapshot(
     val sentenceIndex: Int = 0,
     val playing: Boolean = false,
     val profile: VoiceProfile = VoiceProfile.Hana,
-    val rate: Float = 0.9f,
+    val rate: Float = TtsPacks.DEFAULT_RATE,
     val usingNeural: Boolean = false,
     val downloadProgress: Float? = null,
     val status: String? = null
@@ -162,26 +162,27 @@ class HanaPlayer(context: Context) {
                 _state.value = _state.value.copy(
                     usingNeural = true,
                     downloadProgress = null,
-                    status = "Hana voice ready"
+                    status = "Neural voice ready"
                 )
                 return
             }
             try {
                 var files = models.files(language)
                 if (files == null) {
+                    val packName = TtsPacks.forLanguage(language)?.displayName ?: "voice"
                     _state.value = _state.value.copy(
                         downloadProgress = 0f,
-                        status = "Downloading Hana voice…"
+                        status = "Downloading $packName…"
                     )
                     files = models.ensure(language) { p ->
                         _state.value = _state.value.copy(
                             downloadProgress = p,
-                            status = "Downloading Hana voice… ${(p * 100).toInt()}%"
+                            status = "Downloading $packName… ${(p * 100).toInt()}%"
                         )
                     }
                 } else {
                     _state.value = _state.value.copy(
-                        status = "Loading Hana voice…",
+                        status = "Loading neural voice…",
                         downloadProgress = null
                     )
                 }
@@ -189,13 +190,14 @@ class HanaPlayer(context: Context) {
                 _state.value = _state.value.copy(
                     usingNeural = true,
                     downloadProgress = null,
-                    status = "Hana voice ready"
+                    status = "Neural voice ready"
                 )
             } catch (t: Throwable) {
+                val why = models.lastError ?: t.message?.take(48) ?: "load failed"
                 _state.value = _state.value.copy(
                     usingNeural = false,
                     downloadProgress = null,
-                    status = "Using device voice"
+                    status = why
                 )
             }
         }
@@ -235,10 +237,10 @@ class HanaPlayer(context: Context) {
 
     private suspend fun speakNeural(book: Book, list: List<String>, snap: PlayerSnapshot) {
         try {
-            val speed = if (snap.profile == VoiceProfile.Hana) snap.rate * 0.98f else snap.rate
+            val speed = snap.rate
             val sid = TtsPacks.speakerId(book.language, snap.profile)
             val maxSentences = if (book.language == "en") 3 else 2
-            val maxChars = if (book.language == "en") 480 else 320
+            val maxChars = if (book.language == "en") 500 else 320
             val (text, consumed) = TextUtil.speakChunk(
                 list,
                 snap.sentenceIndex,
@@ -262,7 +264,7 @@ class HanaPlayer(context: Context) {
             if (_state.value.playing) advance(consumed)
         } catch (t: Throwable) {
             if (t is kotlinx.coroutines.CancellationException) throw t
-            _state.value = _state.value.copy(usingNeural = false, status = "Using device voice")
+            _state.value = _state.value.copy(usingNeural = false, status = t.message?.take(48) ?: "synth failed")
             val text = list.getOrNull(snap.sentenceIndex).orEmpty()
             val key = "hana-${snap.chapterIndex}-${snap.sentenceIndex}"
             system.speak(text, book.language, key, true) {
@@ -290,7 +292,7 @@ class HanaPlayer(context: Context) {
             list = sentences(book, ch)
         }
         val maxSentences = if (book.language == "en") 3 else 2
-        val maxChars = if (book.language == "en") 480 else 320
+        val maxChars = if (book.language == "en") 500 else 320
         val (next, nextConsumed) = TextUtil.speakChunk(list, se, maxSentences, maxChars)
         if (next.isBlank() || nextConsumed <= 0) return
         val key = "hana-$ch-$se-c$nextConsumed"
