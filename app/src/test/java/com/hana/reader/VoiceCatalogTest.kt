@@ -10,14 +10,16 @@ import org.junit.Test
 
 class VoiceCatalogTest {
     @Test
-    fun englishStartsWithSmoothAndKeepsBella() {
+    fun englishIsSmoothThenWarm() {
         val en = VoiceCatalog.ENGLISH
         assertEquals("en_lessac", en.first().id)
         assertEquals(TtsPacks.EN_SMOOTH.packId, en.first().packId)
+        assertEquals("en_amy", en[1].id)
+        assertEquals(TtsPacks.EN_WARM.packId, en[1].packId)
         assertNull(VoiceCatalog.find("af"))
-        assertFalse(en.any { it.id == "af" })
-        assertTrue(en.any { it.id == "af_bella" })
-        assertTrue(en.any { it.id == "en_lessac" && it.packId == TtsPacks.EN_SMOOTH.packId })
+        assertNull(VoiceCatalog.find("af_bella"))
+        assertFalse(en.any { it.id.startsWith("af_") })
+        assertEquals(2, en.size)
     }
 
     @Test
@@ -25,8 +27,17 @@ class VoiceCatalogTest {
         assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.defaultId("en"))
         assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.englishIdAfterComfortMigration(null))
         assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.englishIdAfterComfortMigration("af_bella"))
-        assertEquals("af_nicole", com.hana.reader.tts.VoiceDefaults.englishIdAfterComfortMigration("af_nicole"))
+        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.englishIdAfterComfortMigration("en_lessac"))
         assertEquals("id_news", com.hana.reader.tts.VoiceDefaults.defaultId("id"))
+    }
+
+    @Test
+    fun leftoverKokoroWarmVoicesMapToAmy() {
+        assertEquals("en_amy", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("af_bella"))
+        assertEquals("en_amy", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("af_nicole"))
+        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("am_adam"))
+        assertEquals("en_lessac", com.hana.reader.tts.VoiceDefaults.resolveEnglishId(null))
+        assertEquals("en_amy", com.hana.reader.tts.VoiceDefaults.resolveEnglishId("en_amy"))
     }
 
     @Test

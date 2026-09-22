@@ -9,7 +9,6 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
-import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import java.util.concurrent.atomic.AtomicInteger
@@ -39,13 +38,9 @@ class NeuralTtsEngine {
             loadedLang = language
             loadedPackId = packId
             runCatching {
-                val sid = when (files.kind) {
-                    NeuralKind.Kokoro -> TtsPacks.KOKORO_HANA_SID
-                    NeuralKind.Piper -> TtsPacks.PIPER_SID
-                }
                 val warmText = if (language == "id") "Siap." else "Ready."
                 val gen = GenerationConfig(
-                    sid = sid,
+                    sid = TtsPacks.PIPER_SID,
                     speed = 1f,
                     silenceScale = TtsPacks.SILENCE_SCALE
                 )
@@ -69,21 +64,11 @@ class NeuralTtsEngine {
             speed = speed.coerceIn(0.7f, 1.4f),
             silenceScale = TtsPacks.SILENCE_SCALE
         )
-        var audio = synchronized(lock) {
+        val audio = synchronized(lock) {
             tts.generateWithConfig(text = text, config = gen)
         }
-        if (isSilent(audio.samples) && language == "en" && sid == 0 && loadedPackId == TtsPacks.EN.packId) {
-            val retry = GenerationConfig(
-                sid = TtsPacks.KOKORO_HANA_SID,
-                speed = speed.coerceIn(0.7f, 1.4f),
-                silenceScale = TtsPacks.SILENCE_SCALE
-            )
-            audio = synchronized(lock) {
-                tts.generateWithConfig(text = text, config = retry)
-            }
-        }
         if (isSilent(audio.samples)) {
-            error("This voice produced silence — try Bella or Smooth")
+            error("This voice produced silence — try Smooth or Warm")
         }
         return PcmAudio(softNormalize(audio.samples), audio.sampleRate)
     }
@@ -246,20 +231,8 @@ class NeuralTtsEngine {
     }
 
     private fun configFor(files: ModelFiles): OfflineTtsConfig {
-        val model = when (files.kind) {
-            NeuralKind.Kokoro -> OfflineTtsModelConfig(
-                kokoro = OfflineTtsKokoroModelConfig(
-                    model = files.onnx.absolutePath,
-                    voices = files.voices?.absolutePath.orEmpty(),
-                    tokens = files.tokens.absolutePath,
-                    dataDir = files.dataDir.absolutePath,
-                    lengthScale = 1.0f
-                ),
-                numThreads = 4,
-                debug = false,
-                provider = "cpu"
-            )
-            NeuralKind.Piper -> OfflineTtsModelConfig(
+        return OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
                     model = files.onnx.absolutePath,
                     tokens = files.tokens.absolutePath,
@@ -269,12 +242,8 @@ class NeuralTtsEngine {
                 numThreads = 2,
                 debug = false,
                 provider = "cpu"
-            )
-        }
-        val maxSentences = if (files.kind == NeuralKind.Kokoro) 2 else 4
-        return OfflineTtsConfig(
-            model = model,
-            maxNumSentences = maxSentences,
+            ),
+            maxNumSentences = 4,
             silenceScale = TtsPacks.SILENCE_SCALE
         )
     }

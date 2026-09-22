@@ -81,7 +81,7 @@ fun VoicesScreen(nav: NavHostController) {
     val download by models.downloadState.collectAsState()
 
     fun refresh() {
-        val keys = listOf("en", "en-smooth", "id")
+        val keys = TtsPacks.all().map { it.storageKey }
         readyKeys = keys.filter { models.isReady(it) }.toSet()
         bytesByKey = keys.associateWith { models.installedBytes(it) }
         incompleteKeys = keys.filter { models.isIncomplete(it) }.toSet()
@@ -138,7 +138,7 @@ fun VoicesScreen(nav: NavHostController) {
         }
 
         Text(
-            "Smooth is the default English listen — it starts sooner. Bella is warmer but can pause.",
+            "Smooth is the default English listen. Warm is a softer voice that still keeps up.",
             color = Muted,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
@@ -283,8 +283,8 @@ private fun PackCard(
     onRemove: () -> Unit
 ) {
     val blurb = when (pack.packId) {
-        TtsPacks.EN.packId -> "Kokoro fp32 · ~300 MB · warmer voice, slower on some phones"
-        TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · default listen, fewer waits"
+        TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · default listen"
+        TtsPacks.EN_WARM.packId -> "Piper Amy · ~64 MB · softer, still continuous"
         else -> "Piper news · ~63 MB · offline after download"
     }
     Surface(

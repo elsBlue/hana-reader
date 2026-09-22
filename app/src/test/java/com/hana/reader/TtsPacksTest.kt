@@ -11,14 +11,15 @@ import org.junit.Test
 
 class TtsPacksTest {
     @Test
-    fun englishIsKokoroFp32() {
+    fun englishDefaultIsSmoothPiper() {
         val pack = TtsPacks.forLanguage("en")!!
-        assertEquals(NeuralKind.Kokoro, pack.kind)
-        assertTrue(pack.url.endsWith("kokoro-en-v0_19.tar.bz2"))
+        assertEquals(NeuralKind.Piper, pack.kind)
+        assertEquals(TtsPacks.EN_SMOOTH, pack)
+        assertTrue(pack.url.contains("en_US-lessac-medium"))
         assertFalse(pack.url.contains("int8"))
-        assertEquals("kokoro-en-v0_19-fp32", pack.packId)
-        assertEquals(1, TtsPacks.speakerId("en", VoiceProfile.Hana)) // af_bella
-        assertEquals(3, TtsPacks.speakerId("en", VoiceProfile.Clear))
+        assertFalse(pack.url.contains("kokoro"))
+        assertEquals(0, TtsPacks.speakerId("en", VoiceProfile.Hana))
+        assertEquals(0, TtsPacks.speakerId("en", VoiceProfile.Clear))
     }
 
     @Test
@@ -31,9 +32,17 @@ class TtsPacksTest {
 
     @Test
     fun playerCaptionExplainsEngineAndSwitch() {
-        val neural = TtsPacks.playerCaption("en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = null)
-        assertTrue(neural.contains("Kokoro"))
-        assertTrue(neural.contains("af_bella"))
+        val neural = TtsPacks.playerCaption(
+            "en",
+            VoiceProfile.Hana,
+            usingNeural = true,
+            downloading = false,
+            status = null,
+            selectedVoiceName = "lessac",
+            selectedVoiceId = "en_lessac"
+        )
+        assertTrue(neural.contains("Smooth"))
+        assertTrue(neural.contains("lessac"))
         assertTrue(neural.contains("tap = system"))
 
         val offline = TtsPacks.playerCaption("en", VoiceProfile.Hana, usingNeural = false, downloading = false, status = null)
@@ -80,28 +89,29 @@ class TtsPacksTest {
     }
 
     @Test
-    fun smoothEnglishIsPiperLessac() {
-        val pack = TtsPacks.forLanguage("en-smooth")!!
+    fun warmEnglishIsPiperAmy() {
+        val pack = TtsPacks.forLanguage("en-amy")!!
         assertEquals(NeuralKind.Piper, pack.kind)
-        assertEquals("en-smooth", pack.storageKey)
-        assertEquals("piper-en-lessac-medium", pack.packId)
-        assertTrue(pack.url.contains("en_US-lessac-medium"))
+        assertEquals("en-amy", pack.storageKey)
+        assertEquals("piper-en-amy-medium", pack.packId)
+        assertTrue(pack.url.contains("en_US-amy-medium"))
         assertFalse(pack.url.contains("int8"))
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
-        assertEquals(TtsPacks.EN, TtsPacks.packForVoice("af_bella"))
+        assertEquals(TtsPacks.EN_WARM, TtsPacks.packForVoice("en_amy"))
+        assertNull(TtsPacks.packForVoice("af_bella"))
         assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_news"))
-        assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN), TtsPacks.packsForLanguage("en"))
+        assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN_WARM), TtsPacks.packsForLanguage("en"))
         val caption = TtsPacks.playerCaption(
             "en",
             VoiceProfile.Hana,
             usingNeural = true,
             downloading = false,
             status = null,
-            selectedVoiceName = "lessac",
-            selectedVoiceId = "en_lessac"
+            selectedVoiceName = "amy",
+            selectedVoiceId = "en_amy"
         )
-        assertTrue(caption.contains("Smooth"))
-        assertTrue(caption.contains("lessac"))
+        assertTrue(caption.contains("Warm"))
+        assertTrue(caption.contains("amy"))
     }
 
     @Test
@@ -112,8 +122,8 @@ class TtsPacksTest {
         assertEquals("model.onnx", TtsPacks.safeTarRelative("model.onnx"))
         assertEquals("model.onnx", TtsPacks.safeTarRelative("./model.onnx"))
         assertEquals(
-            "kokoro-en-v0_19/voices.bin",
-            TtsPacks.safeTarRelative("kokoro-en-v0_19/voices.bin")
+            "vits-piper-en_US-amy-medium/en_US-amy-medium.onnx",
+            TtsPacks.safeTarRelative("vits-piper-en_US-amy-medium/en_US-amy-medium.onnx")
         )
     }
 }

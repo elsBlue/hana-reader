@@ -1,6 +1,6 @@
 package com.hana.reader.tts
 
-enum class NeuralKind { Kokoro, Piper }
+enum class NeuralKind { Piper }
 
 data class TtsPack(
     val language: String,
@@ -15,29 +15,11 @@ data class TtsPack(
 )
 
 object TtsPacks {
-    // kokoro-en-v0_19 speaker map:
-    // 0 af, 1 af_bella, 2 af_nicole, 3 af_sarah, 4 af_sky, ...
-    const val KOKORO_HANA_SID = 1 // af_bella
-    const val KOKORO_CLEAR_SID = 3 // af_sarah
     const val PIPER_SID = 0
-    const val KOKORO_VOICE_HANA = "af_bella"
-    const val KOKORO_VOICE_CLEAR = "af_sarah"
     const val DEFAULT_RATE = 0.92f
     const val SILENCE_SCALE = 0.4f
+    const val RETIRED_KOKORO_STORAGE_KEY = "en"
 
-    val EN = TtsPack(
-        language = "en",
-        kind = NeuralKind.Kokoro,
-        // fp32 — int8 on Android/ARM has known quality bugs (sherpa-onnx #3754)
-        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2",
-        archiveName = "kokoro-en-v0_19.tar.bz2",
-        minArchiveBytes = 200L * 1024 * 1024,
-        packId = "kokoro-en-v0_19-fp32",
-        displayName = "Kokoro",
-        storageKey = "en"
-    )
-
-    /** Faster English neural for continuous listen when Kokoro RTF cannot keep up. */
     val EN_SMOOTH = TtsPack(
         language = "en",
         kind = NeuralKind.Piper,
@@ -47,6 +29,18 @@ object TtsPacks {
         packId = "piper-en-lessac-medium",
         displayName = "Smooth",
         storageKey = "en-smooth"
+    )
+
+    /** Warmer English Piper — same speed class as Smooth, replaces Kokoro/Bella. */
+    val EN_WARM = TtsPack(
+        language = "en",
+        kind = NeuralKind.Piper,
+        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-medium.tar.bz2",
+        archiveName = "vits-piper-en_US-amy-medium.tar.bz2",
+        minArchiveBytes = 40L * 1024 * 1024,
+        packId = "piper-en-amy-medium",
+        displayName = "Warm",
+        storageKey = "en-amy"
     )
 
     val ID = TtsPack(
@@ -60,41 +54,36 @@ object TtsPacks {
         storageKey = "id"
     )
 
+    fun all(): List<TtsPack> = listOf(EN_SMOOTH, EN_WARM, ID)
+
     fun forLanguage(language: String): TtsPack? = when (language) {
-        "en" -> EN
+        "en", "en-smooth" -> EN_SMOOTH
+        "en-amy" -> EN_WARM
         "id" -> ID
-        "en-smooth" -> EN_SMOOTH
         else -> null
     }
 
     fun packsForLanguage(language: String): List<TtsPack> = when (language) {
-        "en" -> listOf(EN_SMOOTH, EN)
+        "en" -> listOf(EN_SMOOTH, EN_WARM)
         "id" -> listOf(ID)
         else -> emptyList()
     }
 
-    fun packById(packId: String): TtsPack? = listOf(EN, EN_SMOOTH, ID).firstOrNull { it.packId == packId }
+    fun packById(packId: String): TtsPack? = all().firstOrNull { it.packId == packId }
 
     fun packForVoice(voiceId: String?): TtsPack? {
         val voice = voiceId?.let { VoiceCatalog.find(it) } ?: return null
         return packById(voice.packId) ?: forLanguage(voice.language)
     }
 
-
     fun speakerId(language: String, profile: VoiceProfile, selectedSid: Int? = null): Int {
-        if (profile != VoiceProfile.Hana) {
-            return if (language == "id") PIPER_SID else KOKORO_CLEAR_SID
-        }
         if (language == "id") return PIPER_SID
-        return selectedSid ?: KOKORO_HANA_SID
+        return selectedSid ?: PIPER_SID
     }
 
     fun voiceName(language: String, profile: VoiceProfile, selectedId: String? = null): String {
-        if (profile != VoiceProfile.Hana) {
-            return if (language == "id") "news" else KOKORO_VOICE_CLEAR
-        }
         if (selectedId != null) return VoiceCatalog.find(selectedId)?.name ?: selectedId
-        return if (language == "id") "news" else KOKORO_VOICE_HANA
+        return if (language == "id") "news" else "lessac"
     }
 
     /** Short label for the mini player: what is speaking + how to switch. */
