@@ -26,11 +26,12 @@ class TtsModelManager(context: Context) {
 
     fun isReady(language: String): Boolean {
         val pack = TtsPacks.forLanguage(language) ?: return false
-        return File(langDir(language), READY).isFile && findFiles(langDir(language), pack.kind) != null
+        return readyMatches(language, pack) && findFiles(langDir(language), pack.kind) != null
     }
 
     fun files(language: String): ModelFiles? {
         val pack = TtsPacks.forLanguage(language) ?: return null
+        if (!readyMatches(language, pack)) return null
         return findFiles(langDir(language), pack.kind)
     }
 
@@ -50,7 +51,7 @@ class TtsModelManager(context: Context) {
                 archive.delete()
                 val found = findFiles(dir, pack.kind)
                     ?: error("Voice pack extracted but files were missing")
-                File(dir, READY).writeText("ok")
+                File(dir, READY).writeText(pack.packId)
                 onProgress(1f)
                 return found
             } catch (t: Throwable) {
@@ -59,6 +60,12 @@ class TtsModelManager(context: Context) {
                 throw t
             }
         }
+    }
+
+    private fun readyMatches(language: String, pack: TtsPack): Boolean {
+        val ready = File(langDir(language), READY)
+        if (!ready.isFile) return false
+        return ready.readText().trim() == pack.packId
     }
 
     private fun langDir(language: String) = File(root, language)
@@ -70,8 +77,8 @@ class TtsModelManager(context: Context) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = 30_000
-            readTimeout = 60_000
-            setRequestProperty("User-Agent", "HanaReader/1.1")
+            readTimeout = 120_000
+            setRequestProperty("User-Agent", "HanaReader/1.2")
         }
         conn.inputStream.use { input ->
             val total = conn.contentLengthLong.coerceAtLeast(1L)
@@ -126,9 +133,10 @@ class TtsModelManager(context: Context) {
         fun findFiles(dir: File, kind: NeuralKind): ModelFiles? {
             if (!dir.isDirectory) return null
             val files = dir.walkTopDown().filter { it.isFile }.toList()
+            // Prefer full-precision ONNX over int8 (better quality on ARM).
             val onnx = files
                 .filter { it.name.endsWith(".onnx") }
-                .sortedBy { if (it.name.contains("int8")) 0 else 1 }
+                .sortedBy { if (it.name.contains("int8")) 1 else 0 }
                 .firstOrNull() ?: return null
             val tokens = files.firstOrNull { it.name == "tokens.txt" } ?: return null
             val dataDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }

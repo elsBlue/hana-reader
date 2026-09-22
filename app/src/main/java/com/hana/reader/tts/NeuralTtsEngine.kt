@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
@@ -39,11 +40,16 @@ class NeuralTtsEngine {
             }
             current
         }
+        val gen = GenerationConfig(
+            sid = sid,
+            speed = speed.coerceIn(0.7f, 1.4f),
+            silenceScale = TtsPacks.SILENCE_SCALE
+        )
         val audio = synchronized(lock) {
-            tts.generate(text = text, sid = sid, speed = speed.coerceIn(0.7f, 1.4f))
+            tts.generateWithConfig(text = text, config = gen)
         }
         if (audio.samples.isEmpty()) error("Empty synthesis")
-        return PcmAudio(audio.samples, audio.sampleRate)
+        return PcmAudio(softNormalize(audio.samples), audio.sampleRate)
     }
 
     fun play(pcm: PcmAudio) {
@@ -103,6 +109,19 @@ class NeuralTtsEngine {
         }
     }
 
+    private fun softNormalize(samples: FloatArray): FloatArray {
+        var peak = 0f
+        for (s in samples) {
+            val a = kotlin.math.abs(s)
+            if (a > peak) peak = a
+        }
+        if (peak <= 1.0f || peak < 1e-4f) return samples
+        val scale = 0.95f / peak
+        val out = FloatArray(samples.size)
+        for (i in samples.indices) out[i] = samples[i] * scale
+        return out
+    }
+
     private fun configFor(files: ModelFiles): OfflineTtsConfig {
         val model = when (files.kind) {
             NeuralKind.Kokoro -> OfflineTtsModelConfig(
@@ -110,7 +129,8 @@ class NeuralTtsEngine {
                     model = files.onnx.absolutePath,
                     voices = files.voices?.absolutePath.orEmpty(),
                     tokens = files.tokens.absolutePath,
-                    dataDir = files.dataDir.absolutePath
+                    dataDir = files.dataDir.absolutePath,
+                    lengthScale = 1.0f
                 ),
                 numThreads = 2,
                 debug = false,
@@ -120,15 +140,19 @@ class NeuralTtsEngine {
                 vits = OfflineTtsVitsModelConfig(
                     model = files.onnx.absolutePath,
                     tokens = files.tokens.absolutePath,
-                    dataDir = files.dataDir.absolutePath
+                    dataDir = files.dataDir.absolutePath,
+                    lengthScale = 1.0f
                 ),
                 numThreads = 1,
                 debug = false,
                 provider = "cpu"
             )
         }
-        // Allow multi-sentence chunks from HanaPlayer for smoother English prosody.
         val maxSentences = if (files.kind == NeuralKind.Kokoro) 4 else 2
-        return OfflineTtsConfig(model = model, maxNumSentences = maxSentences)
+        return OfflineTtsConfig(
+            model = model,
+            maxNumSentences = maxSentences,
+            silenceScale = TtsPacks.SILENCE_SCALE
+        )
     }
 }

@@ -74,6 +74,7 @@ import com.hana.reader.data.Chapter
 import com.hana.reader.data.ProgressStore
 import com.hana.reader.data.TextUtil
 import com.hana.reader.tts.HanaPlayer
+import com.hana.reader.tts.TtsPacks
 import com.hana.reader.tts.VoiceProfile
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
@@ -408,13 +409,14 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(book.title, maxLines = 1, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                val caption = when {
-                    snap.downloadProgress != null ->
-                        snap.status ?: "Downloading Hana voice…"
-                    snap.profile == VoiceProfile.Hana && snap.usingNeural -> "Hana · neural"
-                    snap.profile == VoiceProfile.Hana -> "Hana · device"
-                    else -> "Device"
-                }
+                val lang = book.language
+                val caption = TtsPacks.playerCaption(
+                    language = lang,
+                    profile = snap.profile,
+                    usingNeural = snap.usingNeural,
+                    downloading = snap.downloadProgress != null,
+                    status = snap.status
+                )
                 Text(
                     caption,
                     color = Muted,
