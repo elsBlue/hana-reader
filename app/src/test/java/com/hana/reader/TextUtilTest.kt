@@ -183,7 +183,8 @@ class TextUtilTest {
         assertEquals(64, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         assertEquals(64, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS)
         assertEquals(1, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_SENTENCES)
-        assertEquals(2, com.hana.reader.tts.HanaPlayer.QUEUE_DEPTH)
+        assertEquals(4, com.hana.reader.tts.HanaPlayer.QUEUE_DEPTH)
+        assertEquals(2, com.hana.reader.tts.HanaPlayer.PLAY_RESUME_DEPTH)
     }
 
     @Test
@@ -274,5 +275,23 @@ class TextUtilTest {
         assertTrue(later.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
         // Same budget → same hard-cap for a single long sentence
         assertEquals(first.text, later.text)
+    }
+
+    @Test
+    fun piperEnChunksAreLargerThanKokoro() {
+        val first = com.hana.reader.tts.HanaPlayer.chunkLimits(
+            "en", true, com.hana.reader.tts.NeuralKind.Piper
+        )
+        val later = com.hana.reader.tts.HanaPlayer.chunkLimits(
+            "en", false, com.hana.reader.tts.NeuralKind.Piper
+        )
+        assertEquals(1, first.first)
+        assertEquals(120, first.second)
+        assertEquals(2, later.first)
+        assertEquals(280, later.second)
+        val kokoroLater = com.hana.reader.tts.HanaPlayer.chunkLimits(
+            "en", false, com.hana.reader.tts.NeuralKind.Kokoro
+        )
+        assertEquals(1 to 64, kokoroLater)
     }
 }

@@ -472,7 +472,8 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
                     usingNeural = snap.usingNeural,
                     downloading = snap.downloadProgress != null,
                     status = snap.status,
-                    selectedVoiceName = selectedVoice?.name
+                    selectedVoiceName = selectedVoice?.name,
+                    selectedVoiceId = selectedVoice?.id
                 )
                 Text(
                     caption,
