@@ -5,7 +5,7 @@ object TextUtil {
         val cleaned = text.replace(Regex("\\s+"), " ").trim()
         if (cleaned.isEmpty()) return emptyList()
         return cleaned
-            .split(Regex("(?<=[.!?\u2026])\\s+"))
+            .split(Regex("(?<=[.!?…])\\s+"))
             .map { it.trim() }
             .filter { it.isNotEmpty() }
     }

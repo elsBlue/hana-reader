@@ -29,7 +29,7 @@ Hana uses the same Google Cloud **web client ID** as Buck Manager. For Google lo
 - Package name: `com.hana.reader`
 - SHA-1 of the debug keystore used by Actions (print it after the first successful run)
 
-Until that is added, **Continue on this phone** still works and progress is saved on the device.
+Until that is added, **Continue locally** still works and progress is saved on the phone.
 
 ## Voice
 
