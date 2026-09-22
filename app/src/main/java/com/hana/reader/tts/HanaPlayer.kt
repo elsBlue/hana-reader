@@ -151,10 +151,19 @@ class HanaPlayer(context: Context) {
         }
     }
 
+    /**
+     * Hana vs Clear only — not the Smooth↔Warm switch path.
+     * Cancels prebuffer/fill so a profile flip cannot race OfflineTts.
+     */
     fun setProfile(profile: VoiceProfile) {
+        val prev = _state.value.profile
         _state.value = _state.value.copy(profile = profile)
         val book = _state.value.book
         val lang = book?.language ?: "en"
+        if (profile != prev) {
+            clearReadyQueue()
+            sentenceRemainder = null
+        }
         if (profile != VoiceProfile.Hana) {
             neural.stop()
             _state.value = _state.value.copy(usingNeural = false, downloadProgress = null, status = null)
@@ -174,7 +183,106 @@ class HanaPlayer(context: Context) {
 
     fun voicePreferences(): VoicePrefs = voicePrefs
     fun modelManager(): TtsModelManager = models
-    fun neuralEngine(): NeuralTtsEngine = neural
+
+    /**
+     * Tear down Listen/prebuffer, release OfflineTts, then prepare [voiceId].
+     * UI must call this instead of touching NeuralTtsEngine directly.
+     */
+    suspend fun switchVoice(language: String, voiceId: String) {
+        prepareMutex.withLock {
+            voicePrefs.setSelectedVoiceId(language, voiceId)
+            _state.value = _state.value.copy(profile = VoiceProfile.Hana, status = "Preparing voice…")
+
+            speakJob?.cancel()
+            speakJob = null
+            fillJob?.cancel()
+            fillJob = null
+            storyStarted = false
+            sentenceRemainder = null
+            clearReadyQueue()
+            neural.stop()
+            system.stop()
+            if (_state.value.playing) {
+                _state.value = _state.value.copy(playing = false)
+                persist()
+            }
+            // synthEpoch already bumped in clearReadyQueue; bump again so stragglers drop.
+            synthEpoch.incrementAndGet()
+            neural.release()
+
+            val pack = TtsPacks.packForVoice(voiceId)
+                ?: TtsPacks.forLanguage(language)
+                ?: error("Unknown voice $voiceId")
+            var files = models.files(pack.storageKey)
+            if (files == null) {
+                _state.value = _state.value.copy(
+                    downloadProgress = 0f,
+                    status = "Downloading ${pack.displayName}…"
+                )
+                files = models.ensure(pack.storageKey) { p ->
+                    _state.value = _state.value.copy(
+                        downloadProgress = p,
+                        status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%"
+                    )
+                }
+            }
+            val modelFiles = files ?: error("Voice pack missing after ensure")
+            withContext(Dispatchers.Default) {
+                neural.prepare(language, modelFiles, pack.packId)
+            }
+            markNeuralReady()
+        }
+    }
+
+    /** Preview a catalog voice without the UI holding OfflineTts. */
+    suspend fun previewVoice(voiceId: String) {
+        val voice = VoiceCatalog.find(voiceId) ?: error("Unknown voice $voiceId")
+        val pack = TtsPacks.packById(voice.packId) ?: error("No pack for $voiceId")
+        prepareMutex.withLock {
+            speakJob?.cancel()
+            speakJob = null
+            fillJob?.cancel()
+            fillJob = null
+            clearReadyQueue()
+            neural.stop()
+            system.stop()
+
+            if (!neural.isLoadedPack(pack.packId)) {
+                neural.release()
+                val files = models.files(pack.storageKey)
+                    ?: models.ensure(pack.storageKey) {}
+                withContext(Dispatchers.Default) {
+                    neural.prepare(voice.language, files, pack.packId)
+                }
+            }
+            val sample = if (voice.language == "id") {
+                "Halo. Ini suara Hana untuk membaca buku secara offline."
+            } else {
+                "Hello. This is Hana, reading softly so long books feel easy."
+            }
+            val epoch = synthEpoch.get()
+            val pcm = withContext(Dispatchers.Default) {
+                neural.synthesize(sample, voice.language, voice.sid, TtsPacks.DEFAULT_RATE)
+            }
+            if (!VoiceSwitchLogic.acceptSynthResult(epoch, synthEpoch.get())) return
+            withContext(Dispatchers.IO) {
+                neural.play(pcm)
+            }
+        }
+    }
+
+    /** Called when the user removes an installed pack from Voices. */
+    fun releaseNeuralPack(packId: String) {
+        if (!neural.isLoadedPack(packId)) return
+        speakJob?.cancel()
+        speakJob = null
+        fillJob?.cancel()
+        fillJob = null
+        clearReadyQueue()
+        neural.stop()
+        neural.release()
+        _state.value = _state.value.copy(usingNeural = false, status = null)
+    }
 
     /**
      * Kick neural prepare early (Voices ready / Reader open) so Listen is warm.
@@ -496,9 +604,14 @@ class HanaPlayer(context: Context) {
 
     private fun kickQueueFill(book: Book, sid: Int, speed: Float) {
         if (fillJob?.isActive == true) return
+        val activeId = activePack(book.language).packId
+        if (!VoiceSwitchLogic.maySynthForQueue(queuePackId, activeId)) return
+        if (!neural.isLoadedPack(activeId)) return
         fillJob = scope.launch(Dispatchers.Default) {
             try {
                 while (_state.value.playing || readyQueue.size < QUEUE_DEPTH) {
+                    if (queuePackId != null && queuePackId != activePack(book.language).packId) break
+                    if (!neural.isLoadedPack(activePack(book.language).packId)) break
                     val added = topUpOne(book, sid, speed) ?: break
                     if (!added) break
                     if (!_state.value.playing && readyQueue.size >= QUEUE_DEPTH) break
@@ -513,9 +626,11 @@ class HanaPlayer(context: Context) {
     /** @return true if a chunk was enqueued, false if nothing left / stopped, null on error skip */
     private suspend fun topUpOne(book: Book, sid: Int, speed: Float): Boolean? {
         val plan: PlannedChunk
+        val activeId = activePack(book.language).packId
         val epoch = synthEpoch.get()
         queueMutex.withLock {
             if (readyQueue.size >= QUEUE_DEPTH) return false
+            if (!VoiceSwitchLogic.maySynthForQueue(queuePackId, activeId)) return false
             val cursor = queueTail ?: QueueCursor(
                 chapterIndex = _state.value.chapterIndex,
                 sentenceIndex = _state.value.sentenceIndex,
@@ -535,9 +650,24 @@ class HanaPlayer(context: Context) {
             }
             reservedKeys.add(next.key)
             queueTail = advanceCursor(book, next)
-            queuePackId = activePack(book.language).packId
+            queuePackId = activeId
             publishQueueSnapshots()
             plan = next
+        }
+        // Drop if voice switched or pack no longer matches before JNI generate.
+        if (!VoiceSwitchLogic.acceptSynthResult(epoch, synthEpoch.get())) {
+            queueMutex.withLock {
+                reservedKeys.remove(plan.key)
+                publishQueueSnapshots()
+            }
+            return false
+        }
+        if (queuePackId != activePack(book.language).packId) {
+            queueMutex.withLock {
+                reservedKeys.remove(plan.key)
+                publishQueueSnapshots()
+            }
+            return false
         }
         val t0 = SystemClock.elapsedRealtime()
         val audio = runCatching {
@@ -548,7 +678,8 @@ class HanaPlayer(context: Context) {
             publishQueueSnapshots()
         }
         if (audio == null) return null
-        if (epoch != synthEpoch.get()) return false
+        if (!VoiceSwitchLogic.acceptSynthResult(epoch, synthEpoch.get())) return false
+        if (queuePackId != activePack(book.language).packId) return false
         val chunk = ReadyChunk(
             key = plan.key,
             text = plan.text,
@@ -561,7 +692,8 @@ class HanaPlayer(context: Context) {
             synthesizedInline = false
         )
         queueMutex.withLock {
-            if (epoch != synthEpoch.get()) return false
+            if (!VoiceSwitchLogic.acceptSynthResult(epoch, synthEpoch.get())) return false
+            if (queuePackId != activePack(book.language).packId) return false
             readyQueue.addLast(chunk)
             queuePackId = activePack(book.language).packId
             publishQueueSnapshots()

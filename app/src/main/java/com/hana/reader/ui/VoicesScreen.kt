@@ -57,6 +57,7 @@ import com.hana.reader.tts.TtsPack
 import com.hana.reader.tts.TtsPacks
 import com.hana.reader.tts.VoiceCatalog
 import com.hana.reader.tts.VoiceProfile
+import com.hana.reader.tts.VoiceSwitchLogic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,7 +68,6 @@ fun VoicesScreen(nav: NavHostController) {
     val player = remember { HanaPlayer.get(context) }
     val prefs = remember { player.voicePreferences() }
     val models = remember { player.modelManager() }
-    val neural = remember { player.neuralEngine() }
     val scope = rememberCoroutineScope()
 
     var langTab by remember { mutableStateOf("en") }
@@ -99,8 +99,14 @@ fun VoicesScreen(nav: NavHostController) {
             is TtsDownloadState.Ready -> {
                 refresh()
                 status = "Ready"
-                val lang = TtsPacks.forLanguage(d.language)?.language ?: d.language
-                runCatching { player.warmPrepare(lang) }
+                val finishedKey = d.language
+                val selected = prefs.selectedVoiceId(langTab)
+                if (VoiceSwitchLogic.shouldWarmPrepareAfterDownload(finishedKey, selected)) {
+                    val lang = TtsPacks.packForVoice(selected)?.language
+                        ?: TtsPacks.forLanguage(finishedKey)?.language
+                        ?: finishedKey
+                    runCatching { player.warmPrepare(lang) }
+                }
             }
             is TtsDownloadState.Failed -> {
                 status = d.message
@@ -196,7 +202,7 @@ fun VoicesScreen(nav: NavHostController) {
                     },
                     onRemove = {
                         models.deletePack(key)
-                        if (neural.isLoadedPack(pack.packId)) neural.release()
+                        player.releaseNeuralPack(pack.packId)
                         status = "${pack.displayName} removed"
                         refresh()
                     }
@@ -223,12 +229,23 @@ fun VoicesScreen(nav: NavHostController) {
                     packLabel = pack?.displayName,
                     previewBusy = previewing,
                     onSelect = {
-                        prefs.setSelectedVoiceId(langTab, voice.id)
                         selectedId = voice.id
-                        player.setProfile(VoiceProfile.Hana)
                         status = "Selected ${voice.label}"
-                        if (!packReady && packKey != null) {
-                            models.startDownload(packKey)
+                        when (VoiceSwitchLogic.onSelectAction(packReady)) {
+                            VoiceSwitchLogic.SelectAction.DownloadOnly -> {
+                                prefs.setSelectedVoiceId(langTab, voice.id)
+                                if (packKey != null) models.startDownload(packKey)
+                            }
+                            VoiceSwitchLogic.SelectAction.SwitchVoice -> {
+                                scope.launch {
+                                    runCatching {
+                                        player.switchVoice(langTab, voice.id)
+                                    }.onFailure {
+                                        status = it.message ?: "Switch failed"
+                                    }
+                                    selectedId = prefs.selectedVoiceId(langTab)
+                                }
+                            }
                         }
                     },
                     onPreview = {
@@ -236,25 +253,7 @@ fun VoicesScreen(nav: NavHostController) {
                         previewing = true
                         scope.launch {
                             runCatching {
-                                withContext(Dispatchers.Default) {
-                                    val files = models.files(packKey)
-                                        ?: models.ensure(packKey) {}
-                                    if (!neural.isLoadedPack(pack.packId)) {
-                                        neural.prepare(voice.language, files, pack.packId)
-                                    }
-                                    val sample = if (voice.language == "id") {
-                                        "Halo. Ini suara Hana untuk membaca buku secara offline."
-                                    } else {
-                                        "Hello. This is Hana, reading softly so long books feel easy."
-                                    }
-                                    val pcm = neural.synthesize(
-                                        sample,
-                                        voice.language,
-                                        voice.sid,
-                                        TtsPacks.DEFAULT_RATE
-                                    )
-                                    neural.play(pcm)
-                                }
+                                player.previewVoice(voice.id)
                             }.onFailure {
                                 status = it.message ?: "Preview failed"
                             }

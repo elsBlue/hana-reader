@@ -1,5 +1,6 @@
 package com.hana.reader.tts
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -49,7 +50,8 @@ class TtsModelManager(
     context: Context,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
-    private val root = File(context.applicationContext.filesDir, "tts")
+    private val appContext = context.applicationContext
+    private val root = File(appContext.filesDir, "tts")
     private val mainHandler = Handler(Looper.getMainLooper())
     private val gate = Mutex()
     private val inFlight = mutableMapOf<String, Job>()
@@ -67,7 +69,7 @@ class TtsModelManager(
 
     fun isReady(language: String): Boolean {
         val pack = TtsPacks.forLanguage(language) ?: return false
-        return readyMatches(language, pack) && findFiles(langDir(language), pack.kind) != null
+        return readyMatches(language, pack) && findFiles(langDir(language), pack.kind, preferInt8 = preferLowRamInt8()) != null
     }
 
     /** Leftover extract/partial without a matching .ready marker. */
@@ -81,7 +83,7 @@ class TtsModelManager(
     fun files(language: String): ModelFiles? {
         val pack = TtsPacks.forLanguage(language) ?: return null
         if (!readyMatches(language, pack)) return null
-        return findFiles(langDir(language), pack.kind)
+        return findFiles(langDir(language), pack.kind, preferInt8 = preferLowRamInt8())
     }
 
     fun isDownloading(language: String): Boolean {
@@ -161,26 +163,57 @@ class TtsModelManager(
         language: String,
         onProgress: (Float, String) -> Unit
     ): ModelFiles {
-        val dir = langDir(language)
-        dir.deleteRecursively()
-        dir.mkdirs()
-        val archive = File(dir, pack.archiveName)
+        val finalDir = langDir(language)
+        val staging = File(root, "$language.staging")
+        staging.deleteRecursively()
+        staging.mkdirs()
+        val archive = File(staging, pack.archiveName)
         try {
             onProgress(0f, "Connecting…")
             download(pack.url, archive, pack.minArchiveBytes) { p ->
                 onProgress(p, "Downloading… ${(p * 100).toInt()}%")
             }
             onProgress(0.96f, "Extracting…")
-            extractTarBz2(archive, dir)
+            extractTarBz2(archive, staging)
             archive.delete()
-            val found = findFiles(dir, pack.kind)
+            val preferInt8 = preferLowRamInt8()
+            val found = findFiles(staging, pack.kind, preferInt8 = preferInt8)
                 ?: error("Voice pack extracted but files were missing")
-            File(dir, READY).writeText(pack.packId)
+            validatePackFiles(found)
+            File(staging, READY).writeText(pack.packId)
+            // Atomic swap: live dir replaced only after a validated staging tree.
+            if (finalDir.exists()) finalDir.deleteRecursively()
+            if (!staging.renameTo(finalDir)) {
+                staging.copyRecursively(finalDir, overwrite = true)
+                staging.deleteRecursively()
+            }
             onProgress(1f, "Ready")
-            return found
+            return findFiles(finalDir, pack.kind, preferInt8 = preferInt8)
+                ?: error("Voice pack missing after install")
         } catch (t: Throwable) {
             archive.delete()
+            staging.deleteRecursively()
             throw t
+        }
+    }
+
+    private fun preferLowRamInt8(): Boolean {
+        val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            ?: return false
+        return am.isLowRamDevice || am.memoryClass < 192
+    }
+
+    private fun validatePackFiles(files: ModelFiles) {
+        if (!files.onnx.isFile || files.onnx.length() < 1_000_000L) {
+            error("ONNX model missing or too small")
+        }
+        files.onnx.inputStream().use { input ->
+            val hdr = ByteArray(4)
+            if (input.read(hdr) < 4) error("ONNX model unreadable")
+        }
+        if (files.tokens.readText().isBlank()) error("tokens.txt is empty")
+        if (!File(files.dataDir, "phontab").isFile || !File(files.dataDir, "phonindex").isFile) {
+            error("espeak-ng-data missing phontab/phonindex")
         }
     }
 
@@ -199,10 +232,15 @@ class TtsModelManager(
     }
 
     fun deletePack(language: String) {
-        langDir(language).deleteRecursively()
         scope.launch {
+            val job = gate.withLock { inFlight[language] }
+            job?.cancel()
+            job?.join()
             gate.withLock {
+                inFlight.remove(language)
                 outcomes.remove(language)
+                langDir(language).deleteRecursively()
+                File(root, "$language.staging").deleteRecursively()
             }
             publish(TtsDownloadState.Idle)
         }
@@ -293,17 +331,27 @@ class TtsModelManager(
     companion object {
         private const val READY = ".ready"
 
-        fun findFiles(dir: File, kind: NeuralKind): ModelFiles? {
+        fun findFiles(dir: File, kind: NeuralKind, preferInt8: Boolean = false): ModelFiles? {
             if (!dir.isDirectory) return null
             val files = dir.walkTopDown().filter { it.isFile }.toList()
-            // Prefer full-precision ONNX over int8 (better quality on ARM).
+            // Default: fp32. On low-RAM, prefer int8 when the pack includes it.
             val onnx = files
                 .filter { it.name.endsWith(".onnx") }
-                .sortedBy { if (it.name.contains("int8")) 1 else 0 }
+                .sortedBy {
+                    val int8 = it.name.contains("int8")
+                    when {
+                        preferInt8 && int8 -> 0
+                        preferInt8 && !int8 -> 1
+                        !preferInt8 && int8 -> 1
+                        else -> 0
+                    }
+                }
                 .firstOrNull() ?: return null
             val tokens = files.firstOrNull { it.name == "tokens.txt" } ?: return null
+            if (tokens.length() <= 0L) return null
             val dataDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
                 ?: return null
+            if (!File(dataDir, "phontab").isFile || !File(dataDir, "phonindex").isFile) return null
             val voices = files.firstOrNull { it.name == "voices.bin" }
             return ModelFiles(kind, onnx, tokens, dataDir, voices)
         }

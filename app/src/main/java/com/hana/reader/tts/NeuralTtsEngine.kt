@@ -28,15 +28,18 @@ class NeuralTtsEngine {
 
     fun prepare(language: String, files: ModelFiles, packId: String = files.kind.name) {
         synchronized(lock) {
-            if (isLoaded(language) && loadedPackId == packId) return
+            // No-op only when the same pack is already live — never reuse a freed pointer.
+            if (session != null && loadedPackId == packId && loadedLang == language) return
             abortStreamLocked()
             session?.release()
+            // Null before construct so a failed OfflineTts() cannot leave a dangling pointer.
             session = null
             loadedLang = null
             loadedPackId = null
             session = OfflineTts(config = configFor(files, packId))
             loadedLang = language
             loadedPackId = packId
+            // Soft-fail warm-up under the same lock (shrinks release/generate race window).
             runCatching {
                 val warmText = if (language == "id") "Siap." else "Ready."
                 val gen = GenerationConfig(
@@ -52,20 +55,18 @@ class NeuralTtsEngine {
     }
 
     fun synthesize(text: String, language: String, sid: Int, speed: Float): PcmAudio {
-        val tts = synchronized(lock) {
-            val current = session
-            if (current == null || loadedLang != language) {
-                error("Neural voice is not loaded")
-            }
-            current
-        }
         val gen = GenerationConfig(
             sid = sid,
             speed = speed.coerceIn(0.7f, 1.15f),
             silenceScale = TtsPacks.SILENCE_SCALE
         )
+        // Hold ONE lock for session check + generate — never copy OfflineTts then unlock.
         val audio = synchronized(lock) {
-            tts.generateWithConfig(text = text, config = gen)
+            val current = session
+            if (current == null || loadedLang != language) {
+                error("Neural voice is not loaded")
+            }
+            current.generateWithConfig(text = text, config = gen)
         }
         if (isSilent(audio.samples)) {
             error("This voice produced silence — try Smooth or Warm")
