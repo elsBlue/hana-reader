@@ -1,8 +1,15 @@
 package com.hana.reader.data
 
 object TextUtil {
-    /** Hard cap for the first audible neural chunk (faster TTFA). */
-    const val FIRST_UTTERANCE_MAX_CHARS = 48
+    /**
+     * Continuous EN neural chunk budget (first + later). Sized so synth time at
+     * RTF≈0.8–1.2 stays ≤ play time of the previous chunk — enables prefetch
+     * to keep up without mid-listen gaps.
+     */
+    const val EN_CHUNK_MAX_CHARS = 64
+
+    /** Hard cap for the first audible neural chunk (faster TTFA). Same as EN continuous budget. */
+    const val FIRST_UTTERANCE_MAX_CHARS = EN_CHUNK_MAX_CHARS
 
     fun normalizeForTts(text: String): String {
         var t = text
@@ -32,6 +39,7 @@ object TextUtil {
     /**
      * Split [text] so the returned prefix is at most [maxChars].
      * Prefers clause punctuation (, ; : — –) or the last whitespace before the cap.
+     * **Never splits mid-word** unless the token itself exceeds [maxChars] (last resort).
      * Second value is the remainder (null if fully consumed). Never drops text.
      */
     fun hardCapUtterance(text: String, maxChars: Int = FIRST_UTTERANCE_MAX_CHARS): Pair<String, String?> {
@@ -43,6 +51,7 @@ object TextUtil {
         val minKeep = (maxChars / 3).coerceAtLeast(1)
 
         var splitAt = -1
+        // 1) Clause punctuation at/after minKeep
         for (i in window.indices.reversed()) {
             val c = window[i]
             if (c == ',' || c == ';' || c == ':' || c == '—' || c == '–') {
@@ -52,18 +61,52 @@ object TextUtil {
                 }
             }
         }
+        // 2) Whitespace at/after minKeep
         if (splitAt < 0) {
             val ws = window.lastIndexOf(' ')
-            splitAt = if (ws >= minKeep) ws else maxChars
+            if (ws >= minKeep) splitAt = ws
+        }
+        // 3) Word-safe: any whitespace in window even below minKeep — never mid-word
+        if (splitAt < 0) {
+            val ws = window.lastIndexOf(' ')
+            if (ws > 0) splitAt = ws
+        }
+        // 4) Last resort: single long token with no space — hard split at maxChars
+        if (splitAt < 0) {
+            splitAt = maxChars
         }
 
         var prefix = t.substring(0, splitAt).trim()
         var rest = t.substring(splitAt).trim()
         if (prefix.isEmpty()) {
-            prefix = t.take(maxChars).trim()
-            rest = t.drop(maxChars).trim()
+            // Avoid empty prefix; still prefer not ending mid-word when possible
+            val fallbackWs = t.lastIndexOf(' ', maxChars.coerceAtMost(t.length - 1))
+            if (fallbackWs > 0) {
+                prefix = t.substring(0, fallbackWs).trim()
+                rest = t.substring(fallbackWs).trim()
+            } else {
+                prefix = t.take(maxChars).trim()
+                rest = t.drop(maxChars).trim()
+            }
         }
         return prefix to rest.ifEmpty { null }
+    }
+
+    /** True when [prefix] does not end with a partial alphanumeric token cut from [original]. */
+    fun endsAtWordBoundary(prefix: String, original: String): Boolean {
+        val p = normalizeForTts(prefix)
+        val o = normalizeForTts(original)
+        if (p.isEmpty() || !o.startsWith(p)) return false
+        if (p.length >= o.length) return true
+        val next = o[p.length]
+        val last = p.last()
+        // Boundary if we ended on whitespace/punct, or next char is whitespace/punct
+        if (last.isWhitespace() || last == ',' || last == ';' || last == ':' ||
+            last == '.' || last == '!' || last == '?' || last == '—' || last == '–'
+        ) {
+            return true
+        }
+        return next.isWhitespace() || !next.isLetterOrDigit() || !last.isLetterOrDigit()
     }
 
     data class SpeakChunkResult(

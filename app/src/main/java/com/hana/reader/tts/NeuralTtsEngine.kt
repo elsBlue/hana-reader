@@ -84,6 +84,11 @@ class NeuralTtsEngine {
         return PcmAudio(softNormalize(audio.samples), audio.sampleRate)
     }
 
+    /**
+     * Blocking PCM playback. [generation] lets [stop] abort a write loop.
+     * Call [stop] only on user pause / seek / profile change — never when
+     * advancing to the next queued chunk (that would cut audio mid-buffer).
+     */
     fun play(pcm: PcmAudio) {
         val gen = generation.incrementAndGet()
         val minBuf = AudioTrack.getMinBufferSize(
