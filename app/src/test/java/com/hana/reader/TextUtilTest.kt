@@ -109,12 +109,15 @@ class TextUtilTest {
 
     @Test
     fun hardCapPrefersClausePunctuation() {
-        val text = "Hello there, this continues after the comma with more words to exceed the cap definitely."
+        // Comma must sit after minKeep (~cap/3) so clause split wins over whitespace.
+        val text = "Words before the break keep growing steadily here, then this long tail continues well past the hundred character hard cap for sure."
         assertTrue(text.length > TextUtil.FIRST_UTTERANCE_MAX_CHARS)
+        val commaAt = text.indexOf(',')
+        assertTrue("comma should be after minKeep", commaAt >= TextUtil.FIRST_UTTERANCE_MAX_CHARS / 3)
         val (prefix, rest) = TextUtil.hardCapUtterance(text, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         assertTrue(prefix.length <= TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         assertNotNull(rest)
-        assertTrue(prefix.contains(','))
+        assertTrue("expected clause split at comma", prefix.trimEnd().endsWith(","))
         assertEquals(
             TextUtil.normalizeForTts(text),
             TextUtil.normalizeForTts("$prefix ${rest!!}")
