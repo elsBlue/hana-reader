@@ -344,11 +344,7 @@ class HanaPlayer(context: Context) {
 
     private suspend fun speakNeural(book: Book, list: List<String>, snap: PlayerSnapshot) {
         try {
-            val speed = if (book.language == "id") {
-                (snap.rate * 0.92f).coerceIn(0.7f, 1.15f)
-            } else {
-                snap.rate.coerceIn(0.7f, 1.15f)
-            }
+            val speed = snap.rate.coerceIn(0.7f, 1.15f)
             val sid = TtsPacks.speakerId(book.language, snap.profile, voicePrefs.selectedSid(book.language))
             val isFirst = firstChunkAfterRestart && sentenceRemainder == null
             if (firstChunkAfterRestart) firstChunkAfterRestart = false

@@ -16,19 +16,38 @@ data class TtsPack(
 
 object TtsPacks {
     const val PIPER_SID = 0
-    /** Slightly slower than conversation — people need time to hear the words. */
-    const val DEFAULT_RATE = 0.82f
-    /** 1.0 = natural Piper pauses. 0.4 was crushing commas and sentence gaps. */
-    const val SILENCE_SCALE = 1.35f
-    /** >1 draws vowels out a little so Smooth is not a rush. */
-    const val LENGTH_SCALE = 1.12f
-    /** Lower than Piper default (0.667) — cuts the VITS radio-static shimmer. */
-    const val NOISE_SCALE = 0.50f
-    const val NOISE_SCALE_W = 0.60f
-    const val SENTENCE_PAUSE_MS = 320
-    const val COMMA_PAUSE_MS = 140
+    /**
+     * Pass 1.0 into sherpa so model lengthScale is used.
+     * (If speed != 1, sherpa overwrites length_scale with 1/speed.)
+     */
+    const val DEFAULT_RATE = 1.0f
+    /** Honor Piper's own pauses; 0.4 used to crush commas. */
+    const val SILENCE_SCALE = 1.0f
+    const val SENTENCE_PAUSE_MS = 400
+    const val COMMA_PAUSE_MS = 180
     const val BREATH_PAUSE_MS = 40
     const val RETIRED_KOKORO_STORAGE_KEY = "en"
+
+    /**
+     * Piper VITS knobs from the mobile config guide.
+     * Smooth: slightly slower, crisp rhythm.
+     * Warm (Amy): 1.20 length, default noise, slightly looser duration.
+     */
+    data class Acoustic(
+        val lengthScale: Float,
+        val noiseScale: Float,
+        val noiseScaleW: Float,
+    )
+
+    val SMOOTH_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.667f, noiseScaleW = 0.70f)
+    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.20f, noiseScale = 0.667f, noiseScaleW = 0.85f)
+    val ID_ACOUSTIC = Acoustic(lengthScale = 1.18f, noiseScale = 0.667f, noiseScaleW = 0.70f)
+
+    fun acousticFor(packId: String): Acoustic = when (packId) {
+        EN_SMOOTH.packId -> SMOOTH_ACOUSTIC
+        EN_WARM.packId -> WARM_ACOUSTIC
+        else -> ID_ACOUSTIC
+    }
 
     val EN_SMOOTH = TtsPack(
         language = "en",

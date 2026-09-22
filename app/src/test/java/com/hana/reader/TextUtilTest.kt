@@ -28,9 +28,9 @@ class TextUtilTest {
 
     @Test
     fun trailingPauseHonorsPunctuation() {
-        assertEquals(320, TextUtil.trailingPauseMs("The river was quiet."))
-        assertEquals(320, TextUtil.trailingPauseMs("Are you ready?"))
-        assertEquals(140, TextUtil.trailingPauseMs("Wait, then go,"))
+        assertEquals(400, TextUtil.trailingPauseMs("The river was quiet."))
+        assertEquals(400, TextUtil.trailingPauseMs("Are you ready?"))
+        assertEquals(180, TextUtil.trailingPauseMs("Wait, then go,"))
         assertEquals(40, TextUtil.trailingPauseMs("mid sentence leftover"))
         assertEquals(0, TextUtil.trailingPauseMs("   "))
     }

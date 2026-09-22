@@ -116,12 +116,21 @@ class TtsPacksTest {
 
     @Test
     fun comfortListenHonorsPausesAndSlowsDown() {
-        assertTrue("default rate must be slower than conversation", TtsPacks.DEFAULT_RATE <= 0.85f)
-        assertTrue("silenceScale 0.4 crushed commas", TtsPacks.SILENCE_SCALE >= 1.2f)
-        assertTrue(TtsPacks.LENGTH_SCALE >= 1.1f)
-        assertTrue(TtsPacks.NOISE_SCALE <= 0.55f)
-        assertEquals(320, TtsPacks.SENTENCE_PAUSE_MS)
-        assertEquals(140, TtsPacks.COMMA_PAUSE_MS)
+        assertEquals(1.0f, TtsPacks.DEFAULT_RATE)
+        assertEquals(1.0f, TtsPacks.SILENCE_SCALE)
+        assertEquals(400, TtsPacks.SENTENCE_PAUSE_MS)
+        assertEquals(180, TtsPacks.COMMA_PAUSE_MS)
+        val smooth = TtsPacks.acousticFor(TtsPacks.EN_SMOOTH.packId)
+        assertEquals(1.15f, smooth.lengthScale)
+        assertEquals(0.667f, smooth.noiseScale)
+        assertEquals(0.70f, smooth.noiseScaleW)
+        val warm = TtsPacks.acousticFor(TtsPacks.EN_WARM.packId)
+        assertEquals(1.20f, warm.lengthScale)
+        assertEquals(0.667f, warm.noiseScale)
+        assertEquals(0.85f, warm.noiseScaleW)
+        val id = TtsPacks.acousticFor(TtsPacks.ID.packId)
+        assertEquals(1.18f, id.lengthScale)
+        assertEquals(0.667f, id.noiseScale)
     }
 
     @Test

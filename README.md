@@ -39,7 +39,7 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 Tap **Listen**. The first English book downloads **Smooth** (~67 MB). **Warm** (~64 MB) is optional in Voices if you want a softer voice. The first Indonesian book downloads Piper (~64 MB). After that, listening works in airplane mode.
 
-Listen is slower than 1.4.3 on purpose: commas and sentence gaps are kept, and Smooth is no longer a rush.
+Listen follows the Piper mobile guide: Smooth is slower (length 1.15), Warm is Amy at 1.20 with natural noise, and every sentence gets a 400ms breath.
 
 Tap the caption on the mini player to switch **Hana · neural** (Piper) and **Device** (system TTS).
 

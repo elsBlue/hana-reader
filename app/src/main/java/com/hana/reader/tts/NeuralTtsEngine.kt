@@ -34,7 +34,7 @@ class NeuralTtsEngine {
             session = null
             loadedLang = null
             loadedPackId = null
-            session = OfflineTts(config = configFor(files))
+            session = OfflineTts(config = configFor(files, packId))
             loadedLang = language
             loadedPackId = packId
             runCatching {
@@ -80,7 +80,7 @@ class NeuralTtsEngine {
     fun writeStreaming(pcm: PcmAudio) {
         val gen = streamGen.get()
         val created = synchronized(lock) { ensureTrack(pcm.sampleRate) }
-        val samples = toPcm16(pcm.samples)
+        val samples = toPcm16(pcm.samples, pcm.sampleRate)
         var offset = 0
         while (offset < samples.size && streamGen.get() == gen) {
             val n = (samples.size - offset).coerceAtMost((pcm.sampleRate / 4).coerceAtLeast(512))
@@ -246,11 +246,11 @@ class NeuralTtsEngine {
         return out
     }
 
-    /** 16-bit with a 3ms edge fade — float PCM buzzes like a broken radio on many phones. */
-    private fun toPcm16(samples: FloatArray): ShortArray {
+    /** 16-bit with a 2–5ms edge fade so chunk joins don't click. */
+    private fun toPcm16(samples: FloatArray, sampleRate: Int): ShortArray {
         val n = samples.size
         val out = ShortArray(n)
-        val fade = 64
+        val fade = ((sampleRate * 5) / 1000).coerceIn(48, n / 8).coerceAtLeast(1)
         for (i in 0 until n) {
             var s = samples[i].coerceIn(-1f, 1f)
             if (i < fade) s *= i.toFloat() / fade
@@ -261,16 +261,17 @@ class NeuralTtsEngine {
         return out
     }
 
-    private fun configFor(files: ModelFiles): OfflineTtsConfig {
+    private fun configFor(files: ModelFiles, packId: String): OfflineTtsConfig {
+        val acoustic = TtsPacks.acousticFor(packId)
         return OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
                     model = files.onnx.absolutePath,
                     tokens = files.tokens.absolutePath,
                     dataDir = files.dataDir.absolutePath,
-                    noiseScale = TtsPacks.NOISE_SCALE,
-                    noiseScaleW = TtsPacks.NOISE_SCALE_W,
-                    lengthScale = TtsPacks.LENGTH_SCALE
+                    noiseScale = acoustic.noiseScale,
+                    noiseScaleW = acoustic.noiseScaleW,
+                    lengthScale = acoustic.lengthScale
                 ),
                 numThreads = 1,
                 debug = false,
