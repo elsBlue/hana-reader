@@ -196,14 +196,17 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
     var books by remember { mutableStateOf(store.allBooks()) }
     val continueBook = store.latest()?.let { store.book(it.bookId) } ?: books.firstOrNull()
     val player = HanaPlayer.get(context)
+    var error by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val activity = GoogleAuth.findActivity(context) ?: return@rememberLauncherForActivityResult
             runCatching { importUri(activity, uri, store) }
                 .onSuccess { book ->
+                    error = null
                     books = store.allBooks()
                     nav.navigate("read/${book.id}")
                 }
+                .onFailure { error = it.message ?: "Could not import that file." }
         }
     }
 
@@ -223,9 +226,25 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                     color = Ink
                 )
             }
-            IconButton(onClick = { picker.launch(arrayOf("application/epub+zip", "text/plain", "*/*")) }) {
-                Icon(Icons.Default.Upload, contentDescription = "Import", tint = Ink)
+            IconButton(onClick = {
+                picker.launch(arrayOf(
+                    "application/epub+zip",
+                    "text/plain",
+                    "text/markdown",
+                    "text/x-markdown"
+                ))
+            }) {
+                Icon(Icons.Default.Upload, contentDescription = "Import EPUB, TXT, or Markdown", tint = Ink)
             }
+        }
+        Text(
+            "EPUB, TXT, or Markdown",
+            color = Muted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        if (error != null) {
+            Text(error!!, color = Rose, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         }
         if (continueBook != null) {
             Surface(
@@ -389,9 +408,14 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
             Column(Modifier.weight(1f)) {
                 Text(book.title, maxLines = 1, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Text(
-                    if (snap.profile == VoiceProfile.Hana) "Hana · Japanese" else "Clear",
+                    if (snap.profile == VoiceProfile.Hana) "Hana · warm" else "Device",
                     color = Muted,
-                    fontSize = 12.sp
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable {
+                        player.setProfile(
+                            if (snap.profile == VoiceProfile.Hana) VoiceProfile.Clear else VoiceProfile.Hana
+                        )
+                    }
                 )
             }
             IconButton(onClick = { player.skipChapter(-1) }) {
@@ -445,11 +469,22 @@ private fun importUri(activity: Activity, uri: Uri, store: ProgressStore): Book 
         )
     }
     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "Imported"
-    val isEpub = name.endsWith(".epub", true) ||
+    val lower = name.lowercase()
+    when {
+        lower.endsWith(".pdf") -> error("PDF isn't supported yet. Export as EPUB or TXT.")
+        lower.endsWith(".doc") || lower.endsWith(".docx") -> error("Word files aren't supported. Save as TXT or EPUB.")
+        lower.endsWith(".mobi") || lower.endsWith(".azw") || lower.endsWith(".azw3") ->
+            error("Kindle files aren't supported. Try EPUB.")
+        !(lower.endsWith(".epub") || lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".markdown") ||
+            (activity.contentResolver.getType(uri)?.contains("epub") == true) ||
+            (activity.contentResolver.getType(uri)?.startsWith("text/") == true)) ->
+            error("Hana reads EPUB, TXT, and Markdown.")
+    }
+    val isEpub = lower.endsWith(".epub") ||
         (activity.contentResolver.getType(uri)?.contains("epub") == true)
     val text = if (isEpub) readEpub(activity, uri) else readText(activity, uri)
     val language = if (Regex("\\b(yang|dan|dengan|tidak|untuk)\\b", RegexOption.IGNORE_CASE).findAll(text.take(1500)).count() >= 4) "id" else "en"
-    val title = name.replace(Regex("\\.(epub|txt)$", RegexOption.IGNORE_CASE), "")
+    val title = name.replace(Regex("\\.(epub|txt|md|markdown)$", RegexOption.IGNORE_CASE), "")
     val book = Book(
         id = "imp-${System.currentTimeMillis()}",
         title = title,

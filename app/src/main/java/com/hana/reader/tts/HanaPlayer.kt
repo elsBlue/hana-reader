@@ -148,38 +148,34 @@ class HanaPlayer(context: Context) : TextToSpeech.OnInitListener {
         }
         applyVoice(snap.profile, book.language)
         tts.setSpeechRate(if (snap.profile == VoiceProfile.Hana) snap.rate * 0.96f else snap.rate)
-        tts.setPitch(if (snap.profile == VoiceProfile.Hana) 1.12f else 1.02f)
+        tts.setPitch(if (snap.profile == VoiceProfile.Hana) 1.05f else 1.0f)
         val params = Bundle()
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "hana-${snap.chapterIndex}-${snap.sentenceIndex}")
     }
 
     private fun applyVoice(profile: VoiceProfile, language: String) {
         if (!ready) return
-        if (profile == VoiceProfile.Hana) {
-            val ja = Locale.JAPANESE
-            tts.language = ja
-            val voice = pickJapaneseFemale()
-            if (voice != null) tts.voice = voice
-        } else {
-            val loc = if (language == "id") Locale("id", "ID") else Locale.US
-            tts.language = loc
-        }
+        val loc = if (language == "id") Locale("id", "ID") else Locale.US
+        tts.language = loc
+        val voice = pickWarmFemale(loc)
+        if (voice != null) tts.voice = voice
+        tts.setPitch(if (profile == VoiceProfile.Hana) 1.05f else 1.0f)
     }
 
-    private fun pickJapaneseFemale(): Voice? {
+    private fun pickWarmFemale(loc: Locale): Voice? {
         val voices = tts.voices ?: return null
-        val ja = voices.filter { it.locale.language == "ja" }
-        return ja.minWithOrNull { a, b ->
-            score(b).compareTo(score(a))
-        }
+        return voices
+            .filter { it.locale.language == loc.language }
+            .maxWithOrNull { a, b -> score(a).compareTo(score(b)) }
     }
 
     private fun score(v: Voice): Int {
         val n = v.name.lowercase()
         var s = 0
-        if (n.contains("female") || n.contains("jab") || n.contains("hfc")) s += 20
-        if (n.contains("male") || n.contains("jad")) s -= 20
-        if (!v.isNetworkConnectionRequired) s += 5
+        if (n.contains("female") || n.contains("woman") || n.contains("samantha") || n.contains("zira") || n.contains("neural")) s += 30
+        if (n.contains("male") || n.contains("man") || n.contains("david") || n.contains("daniel")) s -= 40
+        if (!v.isNetworkConnectionRequired) s += 8
+        if (n.contains("enhanced") || n.contains("premium") || n.contains("quality")) s += 10
         return s
     }
 

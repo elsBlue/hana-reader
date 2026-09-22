@@ -1,14 +1,14 @@
 # Hana
 
-A calm Android ebook reader that speaks in a soft Japanese-girl voice. Built for books you would rather hear than stare at — English and Indonesian.
+A calm Android ebook reader that reads to you in a warm female voice. Built for books you would rather hear than stare at — English and Indonesian.
 
 ## What it does
 
 - Minimal library + reader
 - **Listen like music**: lock the phone, Hana keeps reading from a notification
-- Default voice is Japanese female TTS (Google), slightly slower, slightly warmer
+- Default voice is a warm local female TTS voice (not Japanese-on-English)
 - Google sign-in + local progress saving
-- Import `.txt` or `.epub`
+- Import `.epub`, `.txt`, or Markdown
 - English and Indonesian library to start
 
 ## Download the APK
@@ -33,7 +33,9 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 ## Voice
 
-Install **Google Text-to-Speech** and the **Japanese** language pack on the device. Hana picks a female `ja-JP` voice, pitch `1.12`, rate `0.90`. Switch to **Clear** in the player if you want native English / Indonesian pronunciation.
+Install **Google Text-to-Speech**. Hana picks a warm female voice in the book’s language (English or Indonesian), slightly slower than conversation. Switch to **Device** in the player for a more neutral built-in voice.
+
+The web app uses **Kokoro**, an open neural voice that actually sounds human. Android keeps on-device TTS so listening still works with the screen locked, offline.
 
 ## Signed release
 
