@@ -9,7 +9,12 @@ class VoicePrefs(context: Context) {
         val key = key(language)
         val saved = prefs.getString(key, null)
         if (saved != null && VoiceCatalog.find(saved) != null) return saved
-        return defaultId(language)
+        // Migrate removed Blend (af) or any unknown id to the language default.
+        val migrated = defaultId(language)
+        if (saved != null && saved != migrated) {
+            prefs.edit().putString(key, migrated).apply()
+        }
+        return migrated
     }
 
     fun selectedSid(language: String): Int {

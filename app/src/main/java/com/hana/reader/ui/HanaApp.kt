@@ -48,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -87,17 +88,24 @@ fun HanaApp() {
     val context = LocalContext.current
     val store = remember { ProgressStore(context) }
     var session by remember { mutableStateOf(store.session()) }
+    // Drive the gate with Compose state so we leave LoginScreen in the same frame
+    // after a successful commit — do not rely only on re-reading prefs.
+    var signedIn by remember { mutableStateOf(store.signedIn()) }
     val nav = rememberNavController()
     HanaTheme {
-        if (!store.signedIn()) {
+        if (!signedIn) {
             LoginScreen(
                 onGoogle = { email, photo ->
-                    store.saveGoogle(email, photo)
-                    session = store.session()
+                    if (store.saveGoogle(email, photo)) {
+                        session = store.session()
+                        signedIn = true
+                    }
                 },
                 onLocal = {
-                    store.saveLocal()
-                    session = store.session()
+                    if (store.saveLocal()) {
+                        session = store.session()
+                        signedIn = true
+                    }
                 }
             )
         } else {
@@ -125,6 +133,7 @@ private fun LoginScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(false) }
+    var localLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -170,6 +179,7 @@ private fun LoginScreen(
                     loading = false
                 }
             },
+            enabled = !loading && !localLoading,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = PaperElevated),
             shape = CircleShape
@@ -177,8 +187,21 @@ private fun LoginScreen(
             if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = PaperElevated, strokeWidth = 2.dp)
             else Text("Continue with Google", fontWeight = FontWeight.Medium)
         }
-        TextButton(onClick = onLocal, modifier = Modifier.fillMaxWidth()) {
-            Text("Continue on this phone", color = Ink, fontWeight = FontWeight.Medium)
+        TextButton(
+            onClick = {
+                if (loading || localLoading) return@TextButton
+                localLoading = true
+                onLocal()
+                localLoading = false
+            },
+            enabled = !loading && !localLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (localLoading) {
+                CircularProgressIndicator(Modifier.size(16.dp), color = Ink, strokeWidth = 2.dp)
+            } else {
+                Text("Continue on this phone", color = Ink, fontWeight = FontWeight.Medium)
+            }
         }
         if (error != null) {
             Text(error!!, color = Rose, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
@@ -331,6 +354,12 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     val snap by player.state.collectAsState()
     val saved = store.get(book.id)
     var night by remember { mutableStateOf(false) }
+    // Warm-load neural while the user browses the chapter so Listen is not a cold start.
+    LaunchedEffect(book.id, snap.profile) {
+        if (snap.profile == VoiceProfile.Hana) {
+            player.warmPrepare(book.language)
+        }
+    }
     val bg = if (night) Color(0xFF161310) else Paper
     val fg = if (night) Color(0xFFF3ECE3) else Ink
     Column(Modifier.fillMaxSize().background(bg).statusBarsPadding()) {

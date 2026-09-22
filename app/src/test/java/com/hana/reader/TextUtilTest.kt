@@ -23,4 +23,16 @@ class TextUtilTest {
         assertEquals(3, n)
         assertEquals("One. Two. Three.", text)
     }
+
+    @Test
+    fun speakChunkFirstIsShort() {
+        val sentences = listOf(
+            "Hello there, this is a short opener.",
+            "Then a longer second sentence keeps going for a while.",
+            "And a third one as well."
+        )
+        val (text, n) = TextUtil.speakChunk(sentences, 0, maxSentences = 1, maxChars = 200)
+        assertEquals(1, n)
+        assertEquals("Hello there, this is a short opener.", text)
+    }
 }

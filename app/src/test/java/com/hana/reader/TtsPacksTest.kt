@@ -46,6 +46,18 @@ class TtsPacksTest {
     }
 
     @Test
+    fun preparingStatusSurfacesInCaption() {
+        val prep = TtsPacks.playerCaption(
+            "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Preparing voice…"
+        )
+        assertEquals("Preparing voice…", prep)
+        val synth = TtsPacks.playerCaption(
+            "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Synthesizing…"
+        )
+        assertEquals("Synthesizing…", synth)
+    }
+
+    @Test
     fun unknownLanguageHasNoPack() {
         assertNull(TtsPacks.forLanguage("ja"))
     }

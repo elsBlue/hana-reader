@@ -11,8 +11,8 @@ data class CatalogVoice(
 )
 
 object VoiceCatalog {
+    // Bella first (default). Blend/af sid0 removed — silent / unused in pack UX.
     val ENGLISH = listOf(
-        CatalogVoice("af", "en", 0, "af", "Blend", "Warm mix of Bella + Sarah", TtsPacks.EN.packId),
         CatalogVoice("af_bella", "en", 1, "af_bella", "Bella", "Warm narration — Hana default", TtsPacks.EN.packId),
         CatalogVoice("af_nicole", "en", 2, "af_nicole", "Nicole", "Breathy / soft", TtsPacks.EN.packId),
         CatalogVoice("af_sarah", "en", 3, "af_sarah", "Sarah", "Clear / neutral", TtsPacks.EN.packId),

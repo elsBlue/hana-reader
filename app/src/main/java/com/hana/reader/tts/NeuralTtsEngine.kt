@@ -45,10 +45,23 @@ class NeuralTtsEngine {
             speed = speed.coerceIn(0.7f, 1.4f),
             silenceScale = TtsPacks.SILENCE_SCALE
         )
-        val audio = synchronized(lock) {
+        var audio = synchronized(lock) {
             tts.generateWithConfig(text = text, config = gen)
         }
-        if (audio.samples.isEmpty()) error("Empty synthesis")
+        if (isSilent(audio.samples) && language == "en" && sid == 0) {
+            // Legacy Blend/sid0 — one automatic retry with Bella.
+            val retry = GenerationConfig(
+                sid = TtsPacks.KOKORO_HANA_SID,
+                speed = speed.coerceIn(0.7f, 1.4f),
+                silenceScale = TtsPacks.SILENCE_SCALE
+            )
+            audio = synchronized(lock) {
+                tts.generateWithConfig(text = text, config = retry)
+            }
+        }
+        if (isSilent(audio.samples)) {
+            error("This voice produced silence — try Bella")
+        }
         return PcmAudio(softNormalize(audio.samples), audio.sampleRate)
     }
 
@@ -109,6 +122,16 @@ class NeuralTtsEngine {
         }
     }
 
+    private fun isSilent(samples: FloatArray): Boolean {
+        if (samples.isEmpty()) return true
+        var peak = 0f
+        for (s in samples) {
+            val a = kotlin.math.abs(s)
+            if (a > peak) peak = a
+        }
+        return peak < 1e-3f
+    }
+
     private fun softNormalize(samples: FloatArray): FloatArray {
         var peak = 0f
         for (s in samples) {
@@ -148,7 +171,8 @@ class NeuralTtsEngine {
                 provider = "cpu"
             )
         }
-        val maxSentences = if (files.kind == NeuralKind.Kokoro) 4 else 2
+        // Match smaller speak chunks so the first generate stays light.
+        val maxSentences = if (files.kind == NeuralKind.Kokoro) 2 else 2
         return OfflineTtsConfig(
             model = model,
             maxNumSentences = maxSentences,
