@@ -14,7 +14,7 @@ object VoiceCatalog {
     // Bella first (default). Blend/af sid0 removed — silent / unused in pack UX.
     val ENGLISH = listOf(
         CatalogVoice("af_bella", "en", 1, "af_bella", "Bella", "Warm narration — Hana default", TtsPacks.EN.packId),
-        CatalogVoice("en_lessac", "en", 0, "lessac", "Smooth", "Continuous listen — fewer gaps (Piper)", TtsPacks.EN_SMOOTH.packId),
+        CatalogVoice("en_lessac", "en", 0, "lessac", "Smooth", "Faster listen — fewer waits (Piper)", TtsPacks.EN_SMOOTH.packId),
         CatalogVoice("af_nicole", "en", 2, "af_nicole", "Nicole", "Breathy / soft", TtsPacks.EN.packId),
         CatalogVoice("af_sarah", "en", 3, "af_sarah", "Sarah", "Clear / neutral", TtsPacks.EN.packId),
         CatalogVoice("af_sky", "en", 4, "af_sky", "Sky", "Bright / light", TtsPacks.EN.packId),

@@ -67,6 +67,11 @@ class TtsPacksTest {
             "en", VoiceProfile.Hana, usingNeural = true, downloading = false, status = "Preparing a few lines… 3s"
         )
         assertEquals("Preparing a few lines… 3s", preparing)
+        val slow = TtsPacks.playerCaption(
+            "en", VoiceProfile.Hana, usingNeural = true, downloading = false,
+            status = "Slow on this phone — Voices → Smooth"
+        )
+        assertEquals("Slow on this phone — Voices → Smooth", slow)
     }
 
     @Test
