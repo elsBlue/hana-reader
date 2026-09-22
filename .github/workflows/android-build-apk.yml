@@ -41,6 +41,22 @@ jobs:
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Hana,C=US"
           fi
 
+      - name: Cache sherpa-onnx AAR
+        uses: actions/cache@v4
+        with:
+          path: app/libs/sherpa-onnx-1.13.8.aar
+          key: sherpa-onnx-1.13.8.aar
+
+      - name: Download sherpa-onnx AAR
+        run: |
+          mkdir -p app/libs
+          if [ ! -s app/libs/sherpa-onnx-1.13.8.aar ]; then
+            curl -L --fail -A "HanaReader/1.1" \
+              -o app/libs/sherpa-onnx-1.13.8.aar \
+              https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar
+          fi
+          ls -lh app/libs/sherpa-onnx-1.13.8.aar
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
@@ -87,6 +103,21 @@ jobs:
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: printf "storeFile=release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+
+      - name: Cache sherpa-onnx AAR
+        uses: actions/cache@v4
+        with:
+          path: app/libs/sherpa-onnx-1.13.8.aar
+          key: sherpa-onnx-1.13.8.aar
+
+      - name: Download sherpa-onnx AAR
+        run: |
+          mkdir -p app/libs
+          if [ ! -s app/libs/sherpa-onnx-1.13.8.aar ]; then
+            curl -L --fail -A "HanaReader/1.1" \
+              -o app/libs/sherpa-onnx-1.13.8.aar \
+              https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3

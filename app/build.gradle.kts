@@ -22,9 +22,12 @@ android {
         applicationId = "com.hana.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -76,6 +79,12 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+    packaging {
+        jniLibs {
+            pickFirsts += "**/libc++_shared.so"
+            pickFirsts += "**/libonnxruntime.so"
+        }
+    }
 }
 
 dependencies {
@@ -96,6 +105,40 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation(files("libs/sherpa-onnx-1.13.8.aar"))
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation(libs.junit)
+}
+
+val sherpaAar = file("libs/sherpa-onnx-1.13.8.aar")
+tasks.register("downloadSherpaAar") {
+    outputs.file(sherpaAar)
+    doLast {
+        if (sherpaAar.exists() && sherpaAar.length() > 1_000_000L) return@doLast
+        sherpaAar.parentFile.mkdirs()
+        val tmp = file("${sherpaAar.path}.part")
+        val url = uri("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar").toURL()
+        val conn = url.openConnection()
+        conn.setRequestProperty("User-Agent", "HanaReader/1.1")
+        conn.getInputStream().use { input ->
+            tmp.outputStream().use { input.copyTo(it) }
+        }
+        if (sherpaAar.exists()) sherpaAar.delete()
+        if (!tmp.renameTo(sherpaAar)) {
+            tmp.copyTo(sherpaAar, overwrite = true)
+            tmp.delete()
+        }
+        require(sherpaAar.length() > 1_000_000L) { "sherpa-onnx AAR download failed" }
+    }
+}
+
+afterEvaluate {
+    tasks.matching { it.name.startsWith("pre") && it.name.endsWith("Build") }.configureEach {
+        dependsOn("downloadSherpaAar")
+    }
+    tasks.matching { it.name.contains("compile", ignoreCase = true) && it.name.contains("Kotlin") }.configureEach {
+        dependsOn("downloadSherpaAar")
+    }
 }

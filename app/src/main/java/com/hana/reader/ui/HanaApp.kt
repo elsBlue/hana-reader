@@ -42,6 +42,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -407,16 +408,35 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(book.title, maxLines = 1, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                val caption = when {
+                    snap.downloadProgress != null ->
+                        snap.status ?: "Downloading Hana voice…"
+                    snap.profile == VoiceProfile.Hana && snap.usingNeural -> "Hana · neural"
+                    snap.profile == VoiceProfile.Hana -> "Hana · device"
+                    else -> "Device"
+                }
                 Text(
-                    if (snap.profile == VoiceProfile.Hana) "Hana · warm" else "Device",
+                    caption,
                     color = Muted,
                     fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable {
                         player.setProfile(
                             if (snap.profile == VoiceProfile.Hana) VoiceProfile.Clear else VoiceProfile.Hana
                         )
                     }
                 )
+                snap.downloadProgress?.let { p ->
+                    LinearProgressIndicator(
+                        progress = p,
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .fillMaxWidth(),
+                        color = Rose,
+                        trackColor = Subtle
+                    )
+                }
             }
             IconButton(onClick = { player.skipChapter(-1) }) {
                 Icon(Icons.Default.SkipPrevious, "Previous", tint = Muted)

@@ -50,7 +50,11 @@ class ReadingService : Service() {
     private fun startAsForeground() {
         val snap = HanaPlayer.get(this).state.value
         val title = snap.book?.title ?: getString(R.string.app_name)
-        val text = snap.book?.author ?: "Hana"
+        val text = when {
+            snap.downloadProgress != null -> snap.status ?: "Downloading Hana voice…"
+            snap.status != null -> snap.status
+            else -> snap.book?.author ?: "Hana"
+        }
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

@@ -1,0 +1,25 @@
+Hana Reader third-party notices
+================================
+
+sherpa-onnx
+  License: Apache-2.0
+  https://github.com/k2-fsa/sherpa-onnx
+  Downloaded at build time:
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar
+
+Kokoro-82M (English neural voice, int8 ONNX via sherpa-onnx)
+  License: Apache-2.0
+  https://huggingface.co/hexgrad/Kokoro-82M
+  Downloaded on first English listen:
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2
+  Default speaker: af_nicole (sid 2)
+
+Piper Indonesian voice (id_ID-news_tts-medium)
+  License: MIT (rhasspy/piper-voices catalog)
+  https://huggingface.co/rhasspy/piper-voices
+  Downloaded on first Indonesian listen:
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-id_ID-news_tts-medium.tar.bz2
+
+Apache Commons Compress
+  License: Apache-2.0
+  Used to extract .tar.bz2 voice packs on device.

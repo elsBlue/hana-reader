@@ -6,7 +6,10 @@ A calm Android ebook reader that reads to you in a warm female voice. Built for 
 
 - Minimal library + reader
 - **Listen like music**: lock the phone, Hana keeps reading from a notification
-- Default voice is a warm local female TTS voice (not Japanese-on-English)
+- **Offline neural voices** after one download per language
+  - English: **Kokoro-82M int8** (`af_nicole`)
+  - Indonesian: **Piper** `id_ID-news_tts-medium`
+- Falls back to the device TTS voice if the neural pack is missing
 - Google sign-in + local progress saving
 - Import `.epub`, `.txt`, or Markdown
 - English and Indonesian library to start
@@ -33,9 +36,13 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 ## Voice
 
-Install **Google Text-to-Speech**. Hana picks a warm female voice in the book’s language (English or Indonesian), slightly slower than conversation. Switch to **Device** in the player for a more neutral built-in voice.
+Tap **Listen**. The first English book downloads the Kokoro pack (~100 MB) into app storage. The first Indonesian book downloads Piper (~64 MB). After that, listening works in airplane mode.
 
-The web app uses **Kokoro**, an open neural voice that actually sounds human. Android keeps on-device TTS so listening still works with the screen locked, offline.
+Tap the caption on the mini player to switch **Hana · neural** (Kokoro/Piper) and **Device** (system TTS).
+
+The web preview uses Kokoro in the browser. This Android app uses sherpa-onnx so playback still works with the screen locked.
+
+See `NOTICE` for licenses and download URLs.
 
 ## Signed release
 

@@ -13,3 +13,5 @@ local.properties
 .DS_Store
 .kotlin/
 keystore.properties
+app/libs/*.aar
+app/libs/*.part
