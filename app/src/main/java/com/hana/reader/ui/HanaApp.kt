@@ -227,7 +227,9 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
     val context = LocalContext.current
     var filter by remember { mutableStateOf("all") }
     var books by remember { mutableStateOf(store.allBooks()) }
-    val continueBook = store.latest()?.let { store.book(it.bookId) } ?: books.firstOrNull()
+    val imported = remember(books) { store.imported() }
+    // CONTINUE only for real saved progress — never force first built-in (avoids voice prep).
+    val continueBook = store.latest()?.let { store.book(it.bookId) }
     val player = HanaPlayer.get(context)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -239,13 +241,7 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    // Pre-warm voice + first line for Continue before the user taps Listen.
-    LaunchedEffect(continueBook?.id) {
-        val book = continueBook ?: return@LaunchedEffect
-        if (player.state.value.profile == VoiceProfile.Hana) {
-            runCatching { player.warmPrepare(book.language, book) }
-        }
-    }
+    // No Library auto warmPrepare / Smooth download — wait for Listen or Voices.
     var error by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -258,6 +254,14 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                 }
                 .onFailure { error = it.message ?: "Could not import that file." }
         }
+    }
+    val openImport = {
+        picker.launch(arrayOf(
+            "application/epub+zip",
+            "text/plain",
+            "text/markdown",
+            "text/x-markdown"
+        ))
     }
 
     Column(
@@ -279,22 +283,26 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
             IconButton(onClick = { nav.navigate("voices") }) {
                 Icon(Icons.Default.RecordVoiceOver, contentDescription = "Voices", tint = Ink)
             }
-            IconButton(onClick = {
-                picker.launch(arrayOf(
-                    "application/epub+zip",
-                    "text/plain",
-                    "text/markdown",
-                    "text/x-markdown"
-                ))
-            }) {
-                Icon(Icons.Default.Upload, contentDescription = "Import EPUB, TXT, or Markdown", tint = Ink)
-            }
+        }
+        // Primary post-login action: upload-first.
+        Button(
+            onClick = openImport,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp)
+                .height(52.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = PaperElevated),
+            shape = CircleShape
+        ) {
+            Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Add your book", fontWeight = FontWeight.Medium, fontSize = 16.sp)
         }
         Text(
-            "EPUB, TXT, or Markdown · Voices icon to manage packs",
+            "EPUB, TXT, or Markdown · then Listen when you are ready",
             color = Muted,
             fontSize = 12.sp,
-            modifier = Modifier.padding(top = 4.dp)
+            modifier = Modifier.padding(top = 8.dp)
         )
         if (error != null) {
             Text(error!!, color = Rose, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
@@ -333,6 +341,13 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                     }
                 }
             }
+        } else if (imported.isEmpty()) {
+            Text(
+                "Your imported books will show here. Built-in titles are below if you want a sample.",
+                color = Muted,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 16.dp)
+            )
         }
         Row(Modifier.padding(top = 18.dp, bottom = 8.dp)) {
             listOf("all" to "All", "en" to "English", "id" to "Indonesia").forEach { (key, label) ->
@@ -351,6 +366,7 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                 )
             }
         }
+        // Imported first (allBooks already orders imported + built-in).
         val visible = books.filter { filter == "all" || it.language == filter }
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
@@ -385,7 +401,8 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     }
     val bg = if (night) Color(0xFF161310) else Paper
     val fg = if (night) Color(0xFFF3ECE3) else Ink
-    val warmFg = warmListenInk(night)
+    // Honest highlight: no warm-ink jump (sentence sync is not word-accurate).
+    // Auto-scroll to the active sentence remains below.
     val listState = rememberLazyListState()
     val chapterSentences = remember(book.id, book.chapters) {
         book.chapters.map { chapter -> TextUtil.splitSentences(chapter.body) }
@@ -479,12 +496,9 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
                 }
                 chapterSentences[ci].forEachIndexed { si, sentence ->
                     item(key = "${book.id}-ch-$ci-s-$si") {
-                        val active = isThisBook &&
-                            snap.chapterIndex == ci &&
-                            snap.sentenceIndex == si
                         Text(
                             text = sentence,
-                            color = if (active) warmFg else fg,
+                            color = fg,
                             fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.Normal,
                             fontSize = 18.sp,
@@ -562,10 +576,17 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
                         }
                     )
                     snap.downloadProgress?.let { p ->
+                        Text(
+                            "${(p * 100).toInt()}%",
+                            color = Rose,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
                         LinearProgressIndicator(
                             progress = { p },
                             modifier = Modifier
-                                .padding(top = 4.dp)
+                                .padding(top = 2.dp)
                                 .fillMaxWidth(),
                             color = Rose,
                             trackColor = Subtle
@@ -655,12 +676,29 @@ private fun VoiceBusyOverlay() {
                 CircularProgressIndicator(color = Rose, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    snap.busyMessage ?: "Preparing…",
+                    snap.status?.takeIf { it.isNotBlank() }
+                        ?: snap.busyMessage
+                        ?: "Preparing…",
                     color = Ink,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
                 )
-                Text(
+                snap.downloadProgress?.let { p ->
+                    LinearProgressIndicator(
+                        progress = { p },
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .width(180.dp),
+                        color = Rose,
+                        trackColor = Subtle
+                    )
+                    Text(
+                        "${(p * 100).toInt()}%",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                } ?: Text(
                     "Please wait — voice is loading",
                     color = Muted,
                     fontSize = 12.sp,

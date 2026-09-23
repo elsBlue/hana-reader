@@ -125,9 +125,9 @@ class TtsPacksTest {
         assertEquals(0.667f, smooth.noiseScale)
         assertEquals(0.70f, smooth.noiseScaleW)
         val warm = TtsPacks.acousticFor(TtsPacks.EN_WARM.packId)
-        assertEquals(1.20f, warm.lengthScale)
-        assertEquals(0.55f, warm.noiseScale)
-        assertEquals(0.60f, warm.noiseScaleW)
+        assertEquals(1.15f, warm.lengthScale)
+        assertEquals(0.50f, warm.noiseScale)
+        assertEquals(0.55f, warm.noiseScaleW)
         // Unknown pack ids fall back to Smooth acoustics (no ID pack).
         val fallback = TtsPacks.acousticFor("piper-id-news-medium")
         assertEquals(TtsPacks.SMOOTH_ACOUSTIC, fallback)
@@ -136,8 +136,17 @@ class TtsPacksTest {
     @Test
     fun busyMessageIsCalm() {
         assertEquals("Preparing Warm…", TtsPacks.busyMessage("Warm", "en", downloading = false))
-        assertEquals("Downloading Soft…", TtsPacks.busyMessage("Soft", "en", downloading = true))
+        assertEquals(
+            "Downloading Soft for offline listening (~67 MB)",
+            TtsPacks.busyMessage("Soft", "en", downloading = true)
+        )
         assertEquals("Preparing Soft…", TtsPacks.busyMessage("", "id", downloading = false))
+        assertEquals(
+            "Downloading Smooth for offline listening (~67 MB) · 42%",
+            TtsPacks.downloadStatus(TtsPacks.EN_SMOOTH, 0.42f)
+        )
+        assertEquals(67, TtsPacks.approxDownloadMb(TtsPacks.EN_SMOOTH))
+        assertEquals(64, TtsPacks.approxDownloadMb(TtsPacks.EN_WARM))
     }
 
     @Test

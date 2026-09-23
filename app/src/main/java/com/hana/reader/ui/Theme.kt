@@ -15,12 +15,12 @@ val Subtle = Color(0xFFEBE4D8)
 
 
 /**
- * Soft Rose-tinted ink for the active Listen sentence.
- * Color only — no bold, background, underline, or karaoke shrink.
+ * Legacy warm-ink helper (v1.4.9). v1.5.0 Listen no longer recolors the active
+ * sentence — auto-scroll only — so speech sync is not implied. Kept for callers.
  */
 fun warmListenInk(night: Boolean): Color {
     val base = if (night) Color(0xFFF3ECE3) else Ink
-    return lerp(base, Rose, if (night) 0.40f else 0.55f)
+    return lerp(base, Rose, if (night) 0.12f else 0.15f)
 }
 
 private val colors = lightColorScheme(

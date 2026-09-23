@@ -229,14 +229,14 @@ class HanaPlayer(context: Context) {
                 if (files == null) {
                     _state.value = _state.value.copy(
                         downloadProgress = 0f,
-                        status = "Downloading ${pack.displayName}…",
+                        status = TtsPacks.downloadStatus(pack, 0f),
                         busy = true,
                         busyMessage = TtsPacks.busyMessage(label, language, downloading = true),
                     )
                     files = models.ensure(pack.storageKey) { p ->
                         _state.value = _state.value.copy(
                             downloadProgress = p,
-                            status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%",
+                            status = TtsPacks.downloadStatus(pack, p),
                             busy = true,
                             busyMessage = TtsPacks.busyMessage(label, language, downloading = true),
                         )
@@ -312,18 +312,23 @@ class HanaPlayer(context: Context) {
     }
 
     /**
-     * Kick neural prepare early (Voices ready / Reader open) so Listen is warm.
-     * When [book] is provided (or already in state), also pre-synthesize the first
-     * chunks into the lookahead queue while the user is still reading.
+     * Quiet prepare when the selected pack is already on disk (no download, no
+     * VoiceBusyOverlay). If the pack is missing, do nothing — download waits for
+     * an explicit Listen / Voices action.
      */
     fun warmPrepare(language: String, book: Book? = null) {
         if (_state.value.profile != VoiceProfile.Hana) return
         if (TtsPacks.forLanguage(language) == null) return
         scope.launch {
-            runCatching { prepareNeuralIfNeeded(language) }
+            val pack = activePack(language)
+            if (models.files(pack.storageKey) == null) {
+                Log.d(TAG, "warmPrepare skip — ${pack.displayName} not on disk yet")
+                return@launch
+            }
+            runCatching { prepareNeuralIfNeeded(language, blockUi = false) }
                 .onFailure { Log.w(TAG, "warmPrepare failed: ${it.message}") }
             val target = book ?: _state.value.book
-            if (target != null && target.language == language && neural.isLoadedPack(activePack(language).packId)) {
+            if (target != null && target.language == language && neural.isLoadedPack(pack.packId)) {
                 val saved = store.get(target.id)
                 val snap = _state.value
                 val ch = if (snap.book?.id == target.id) {
@@ -396,7 +401,11 @@ class HanaPlayer(context: Context) {
             ?: TtsPacks.EN_SMOOTH
     }
 
-    private suspend fun prepareNeuralIfNeeded(language: String) {
+    /**
+     * @param blockUi full-screen VoiceBusyOverlay — keep false for Listen download
+     * so MiniPlayer can show honest %; switchVoice uses its own busy path.
+     */
+    private suspend fun prepareNeuralIfNeeded(language: String, blockUi: Boolean = false) {
         if (_state.value.profile != VoiceProfile.Hana) return
         if (TtsPacks.forLanguage(language) == null) return
         val pack = activePack(language)
@@ -410,26 +419,40 @@ class HanaPlayer(context: Context) {
                 var files = models.files(key)
                 val voiceLabel = voicePrefs.selectedVoice(language)?.label ?: pack.displayName
                 if (files == null) {
+                    // Consented download (Listen / profile flip). Prefer MiniPlayer % —
+                    // do not opaque-block unless [blockUi] (reserved for switch safety).
                     _state.value = _state.value.copy(
                         downloadProgress = 0f,
-                        status = "Downloading ${pack.displayName}…",
-                        busy = true,
-                        busyMessage = TtsPacks.busyMessage(voiceLabel, language, downloading = true),
+                        status = TtsPacks.downloadStatus(pack, 0f),
+                        busy = blockUi,
+                        busyMessage = if (blockUi) {
+                            TtsPacks.busyMessage(voiceLabel, language, downloading = true)
+                        } else null,
                     )
                     files = models.ensure(key) { p ->
                         _state.value = _state.value.copy(
                             downloadProgress = p,
-                            status = "Downloading ${pack.displayName}… ${(p * 100).toInt()}%",
-                            busy = true,
-                            busyMessage = TtsPacks.busyMessage(voiceLabel, language, downloading = true),
+                            status = TtsPacks.downloadStatus(pack, p),
+                            busy = blockUi,
+                            busyMessage = if (blockUi) {
+                                TtsPacks.busyMessage(voiceLabel, language, downloading = true)
+                            } else null,
                         )
                     }
-                } else {
+                } else if (blockUi) {
                     _state.value = _state.value.copy(
                         status = "Preparing voice…",
                         downloadProgress = null,
                         busy = true,
                         busyMessage = TtsPacks.busyMessage(voiceLabel, language, downloading = false),
+                    )
+                } else {
+                    // Quiet on-disk prepare (warmPrepare / Listen after pack present).
+                    _state.value = _state.value.copy(
+                        status = "Preparing voice…",
+                        downloadProgress = null,
+                        busy = false,
+                        busyMessage = null,
                     )
                 }
                 val modelFiles = files ?: error("Voice pack missing after ensure")
