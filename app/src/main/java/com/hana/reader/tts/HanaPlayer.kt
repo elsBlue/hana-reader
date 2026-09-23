@@ -144,7 +144,7 @@ class HanaPlayer(context: Context) {
             restartSpeak(prepare = true)
         } else {
             clearReadyQueue()
-            scope.launch { prebufferFirstUtterance(book, ch, se) }
+            scope.launch(Dispatchers.Default) { prebufferFirstUtterance(book, ch, se) }
         }
     }
 
@@ -159,7 +159,7 @@ class HanaPlayer(context: Context) {
             restartSpeak(prepare = true)
         } else {
             clearReadyQueue()
-            scope.launch { prebufferFirstUtterance(book, ch, 0) }
+            scope.launch(Dispatchers.Default) { prebufferFirstUtterance(book, ch, 0) }
         }
     }
 
@@ -414,14 +414,15 @@ class HanaPlayer(context: Context) {
     }
 
     /**
-     * Quiet prepare when the selected pack is already on disk (no download, no
-     * VoiceBusyOverlay). If the pack is missing, do nothing — download waits for
-     * an explicit Listen / Voices action.
+     * Quiet OfflineTts load when the selected pack is already on disk (no download,
+     * no VoiceBusyOverlay, no first-utterance prebuffer). Used after Voices download;
+     * Reader open must not call this — prepare waits for explicit Listen.
+     * If the pack is missing, do nothing.
      */
-    fun warmPrepare(language: String, book: Book? = null) {
+    fun warmPrepare(language: String) {
         if (_state.value.profile != VoiceProfile.Hana) return
         if (TtsPacks.forLanguage(language) == null) return
-        scope.launch {
+        scope.launch(Dispatchers.Default) {
             val pack = activePack(language)
             if (models.files(pack.storageKey) == null) {
                 Log.d(TAG, "warmPrepare skip — ${pack.displayName} not on disk yet")
@@ -429,22 +430,6 @@ class HanaPlayer(context: Context) {
             }
             runCatching { prepareNeuralIfNeeded(language, blockUi = false) }
                 .onFailure { Log.w(TAG, "warmPrepare failed: ${it.message}") }
-            val target = book ?: _state.value.book
-            if (target != null && target.language == language && neural.isLoadedPack(pack.packId)) {
-                val saved = store.get(target.id)
-                val snap = _state.value
-                val ch = if (snap.book?.id == target.id) {
-                    snap.chapterIndex
-                } else {
-                    saved?.chapterIndex ?: 0
-                }
-                val se = if (snap.book?.id == target.id) {
-                    snap.sentenceIndex
-                } else {
-                    saved?.sentenceIndex ?: 0
-                }
-                prebufferFirstUtterance(target, ch, se)
-            }
         }
     }
 
@@ -840,8 +825,12 @@ class HanaPlayer(context: Context) {
             return false
         }
         val t0 = SystemClock.elapsedRealtime()
+        // Always off Main — warmPrepare / skip prebuffer used to call topUpOne on
+        // Dispatchers.Main.immediate and freeze Reader for ~10s of ONNX generate.
         val audio = runCatching {
-            neural.synthesize(plan.text, book.language, sid, speed)
+            withContext(Dispatchers.Default) {
+                neural.synthesize(plan.text, book.language, sid, speed)
+            }
         }.getOrNull()
         queueMutex.withLock {
             reservedKeys.remove(plan.key)

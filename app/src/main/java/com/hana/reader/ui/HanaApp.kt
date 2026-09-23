@@ -394,12 +394,7 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     val snap by player.state.collectAsState()
     val saved = store.get(book.id)
     var night by remember { mutableStateOf(false) }
-    // Once per book — do not restart warmPrepare on every player status tick.
-    LaunchedEffect(book.id) {
-        if (player.state.value.profile == VoiceProfile.Hana) {
-            runCatching { player.warmPrepare(book.language, book) }
-        }
-    }
+    // No OfflineTts / prebuffer on open — show text ASAP; prepare only on Listen / Voices.
     val bg = if (night) Color(0xFF161310) else Paper
     val fg = if (night) Color(0xFFF3ECE3) else Ink
     // Honest highlight: no warm-ink jump (sentence sync is not word-accurate).
