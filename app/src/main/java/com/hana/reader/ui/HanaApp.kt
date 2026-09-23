@@ -23,7 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -385,6 +385,31 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     }
     val bg = if (night) Color(0xFF161310) else Paper
     val fg = if (night) Color(0xFFF3ECE3) else Ink
+    val warmFg = warmListenInk(night)
+    val listState = rememberLazyListState()
+    val chapterSentences = remember(book.id, book.chapters) {
+        book.chapters.map { chapter -> TextUtil.splitSentences(chapter.body) }
+    }
+    // Flat LazyColumn indices: 0 = header; each chapter = title + sentences.
+    val sentenceListIndex = remember(chapterSentences) {
+        val firstSentenceIndex = IntArray(chapterSentences.size)
+        var idx = 1 // after header
+        chapterSentences.forEachIndexed { i, sentences ->
+            firstSentenceIndex[i] = idx + 1 // skip chapter title item
+            idx += 1 + sentences.size
+        }
+        firstSentenceIndex
+    }
+    val isThisBook = snap.book?.id == book.id
+    LaunchedEffect(isThisBook, snap.chapterIndex, snap.sentenceIndex, snap.playing) {
+        if (!isThisBook) return@LaunchedEffect
+        val ci = snap.chapterIndex
+        val si = snap.sentenceIndex
+        if (ci !in chapterSentences.indices) return@LaunchedEffect
+        if (si !in chapterSentences[ci].indices) return@LaunchedEffect
+        val target = sentenceListIndex[ci] + si
+        runCatching { listState.animateScrollToItem(target) }
+    }
     Column(Modifier.fillMaxSize().background(bg).statusBarsPadding()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = { nav.popBackStack() }) {
@@ -394,6 +419,7 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
             TextButton(onClick = { night = !night }) { Text(if (night) "Paper" else "Night", color = Muted) }
         }
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 20.dp),
@@ -441,27 +467,37 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
                     }
                 }
             }
-            itemsIndexed(book.chapters, key = { index, chapter -> "${book.id}-$index-${chapter.id}" }) { ci, chapter ->
-                Text(
-                    chapter.title,
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 20.sp,
-                    color = fg,
-                    modifier = Modifier.padding(top = 18.dp, bottom = 8.dp)
-                )
-                val body = remember(chapter.id, chapter.body) {
-                    TextUtil.splitSentences(chapter.body).joinToString(" ")
+            book.chapters.forEachIndexed { ci, chapter ->
+                item(key = "${book.id}-ch-$ci-title-${chapter.id}") {
+                    Text(
+                        chapter.title,
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 20.sp,
+                        color = fg,
+                        modifier = Modifier.padding(top = 18.dp, bottom = 8.dp)
+                    )
                 }
-                Text(
-                    body,
-                    color = fg,
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 18.sp,
-                    lineHeight = 30.sp,
-                    modifier = Modifier.clickable(enabled = !snap.busy) {
-                        player.play(book, ci, 0)
+                chapterSentences[ci].forEachIndexed { si, sentence ->
+                    item(key = "${book.id}-ch-$ci-s-$si") {
+                        val active = isThisBook &&
+                            snap.chapterIndex == ci &&
+                            snap.sentenceIndex == si
+                        Text(
+                            text = sentence,
+                            color = if (active) warmFg else fg,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Normal,
+                            fontSize = 18.sp,
+                            lineHeight = 30.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp)
+                                .clickable(enabled = !snap.busy) {
+                                    player.play(book, ci, si)
+                                }
+                        )
                     }
-                )
+                }
             }
         }
     }
