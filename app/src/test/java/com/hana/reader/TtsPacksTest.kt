@@ -27,8 +27,9 @@ class TtsPacksTest {
         assertNull(TtsPacks.forLanguage("id"))
         assertTrue(TtsPacks.packsForLanguage("id").isEmpty())
         assertEquals(listOf(TtsPacks.EN_SMOOTH), TtsPacks.all())
-        assertNull(TtsPacks.packForVoice("id_news"))
-        assertNull(TtsPacks.packForVoice("id_cerita"))
+        // Retired Indonesian neural ids canonicalize to Smooth (no crash / no dangling pack).
+        assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("id_news"))
+        assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("id_cerita"))
     }
 
     @Test
