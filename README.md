@@ -37,7 +37,7 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 Tap **Listen** when you are ready — the first English voice download is intentional, with a clear **%** progress (Smooth ~67 MB). Indonesian books use the device System TTS for now. After the English pack is installed, listening works in airplane mode.
 
-Listen follows the Piper mobile guide: Smooth is the only offline English neural (length 1.20 factory Pace, modest Texture/Breath), and every sentence gets a 400ms breath. English chunks prefer whole sentences under ~300 characters. The reader auto-scrolls to the active sentence without claiming word-level highlight sync.
+Listen follows the Piper mobile guide: Smooth is the only offline English neural (length 1.20 factory Pace, modest Texture/Breath), and every sentence gets a 400ms breath. Runtime prefers ONNX **XNNPACK** then CPU (never NNAPI), with conservative ORT thread caps. English chunks prefer whole sentences under ~300 characters. The reader auto-scrolls to the active sentence without claiming word-level highlight sync.
 
 Tap the caption on the mini player to switch **Hana · neural** (Piper) and **Device** (system TTS).
 

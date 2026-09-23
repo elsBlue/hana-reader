@@ -19,6 +19,7 @@ class NeuralTtsEngine {
     @Volatile private var loadedLang: String? = null
     @Volatile private var loadedPackId: String? = null
     @Volatile private var loadedAcoustic: TtsPacks.Acoustic? = null
+    @Volatile private var loadedProvider: String? = null
     @Volatile private var track: AudioTrack? = null
     @Volatile private var trackRate: Int = 0
     private val lock = Any()
@@ -46,11 +47,17 @@ class NeuralTtsEngine {
             loadedLang = null
             loadedPackId = null
             loadedAcoustic = null
-            session = OfflineTts(config = configFor(files, packId, acoustic))
+            loadedProvider = null
+            // Path-based load (newFromFile) — never byte[] into Java heap then native again.
+            val created = openSession(files, packId, acoustic)
+            session = created.tts
             loadedLang = language
             loadedPackId = packId
             loadedAcoustic = acoustic
+            loadedProvider = created.provider
+            Log.i(TAG, "OfflineTts ready provider=${created.provider} threads=${created.numThreads} pack=$packId")
             // Soft-fail warm-up under the same lock (shrinks release/generate race window).
+            // GeneratedAudio is a JVM FloatArray copy — no AutoCloseable tensors at Kotlin layer.
             runCatching {
                 val warmText = "Ready."
                 val gen = GenerationConfig(
@@ -168,6 +175,7 @@ class NeuralTtsEngine {
             loadedLang = null
             loadedPackId = null
             loadedAcoustic = null
+            loadedProvider = null
         }
     }
 
@@ -286,11 +294,42 @@ class NeuralTtsEngine {
         return out
     }
 
+    /**
+     * Try XNNPACK then CPU per [OrtRuntimePolicy]. A failed OfflineTts()
+     * constructor leaves no Kotlin instance; we then try the next provider.
+     */
+    private fun openSession(
+        files: ModelFiles,
+        packId: String,
+        acoustic: TtsPacks.Acoustic,
+    ): OpenedSession {
+        var lastError: Throwable? = null
+        for (attempt in OrtRuntimePolicy.loadAttempts()) {
+            if (OrtRuntimePolicy.isNnapi(attempt.provider)) continue
+            try {
+                val tts = OfflineTts(
+                    config = configFor(files, packId, acoustic, attempt.provider, attempt.numThreads)
+                )
+                return OpenedSession(tts, attempt.provider, attempt.numThreads)
+            } catch (t: Throwable) {
+                lastError = t
+                Log.w(
+                    TAG,
+                    "OfflineTts provider=${attempt.provider} threads=${attempt.numThreads} failed: ${t.message}"
+                )
+            }
+        }
+        throw lastError ?: IllegalStateException("OfflineTts failed for pack=$packId")
+    }
+
     private fun configFor(
         files: ModelFiles,
         packId: String,
         acoustic: TtsPacks.Acoustic,
+        provider: String,
+        numThreads: Int,
     ): OfflineTtsConfig {
+        // absolutePath → sherpa newFromFile (native mmap/read) — not Java byte[].
         return OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
@@ -301,14 +340,20 @@ class NeuralTtsEngine {
                     noiseScaleW = acoustic.noiseScaleW,
                     lengthScale = acoustic.lengthScale
                 ),
-                numThreads = 1,
+                numThreads = numThreads,
                 debug = false,
-                provider = "cpu"
+                provider = provider
             ),
             maxNumSentences = 2,
             silenceScale = TtsPacks.SILENCE_SCALE
         )
     }
+
+    private data class OpenedSession(
+        val tts: OfflineTts,
+        val provider: String,
+        val numThreads: Int,
+    )
 
     companion object {
         private const val TAG = "HanaTts"
