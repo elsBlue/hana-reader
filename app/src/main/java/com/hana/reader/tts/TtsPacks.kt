@@ -40,8 +40,8 @@ object TtsPacks {
     )
 
     val SMOOTH_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.667f, noiseScaleW = 0.70f)
-    /** Cleaner Warm: lower noise than 0.85 W which buzzed on Amy. */
-    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.20f, noiseScale = 0.55f, noiseScaleW = 0.60f)
+    /** Cleaner Warm: a touch faster than 1.20, slightly less end buzz; packId unchanged. */
+    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.50f, noiseScaleW = 0.55f)
 
     fun acousticFor(packId: String): Acoustic = when (packId) {
         EN_WARM.packId -> WARM_ACOUSTIC
@@ -101,10 +101,27 @@ object TtsPacks {
     }
 
 
+    /** Approximate on-disk size shown during consented first download. */
+    fun approxDownloadMb(pack: TtsPack): Int = when (pack.packId) {
+        EN_SMOOTH.packId -> 67
+        EN_WARM.packId -> 64
+        else -> 60
+    }
+
     /** Calm wait copy while OfflineTts prepares / downloads. */
     fun busyMessage(voiceLabel: String, language: String, downloading: Boolean = false): String {
         val name = voiceLabel.ifBlank { "Soft" }
-        return if (downloading) "Downloading $name…" else "Preparing $name…"
+        return if (downloading) {
+            "Downloading $name for offline listening (~67 MB)"
+        } else {
+            "Preparing $name…"
+        }
+    }
+
+    /** Honest download status with pack name, size, and optional percent. */
+    fun downloadStatus(pack: TtsPack, progress: Float? = null): String {
+        val base = "Downloading ${pack.displayName} for offline listening (~${approxDownloadMb(pack)} MB)"
+        return if (progress != null) "$base · ${(progress * 100).toInt()}%" else base
     }
 
     /** Short label for the mini player: what is speaking + how to switch. */

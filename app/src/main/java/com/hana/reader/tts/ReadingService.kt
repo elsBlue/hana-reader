@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import com.hana.reader.MainActivity
+import com.hana.reader.NotificationPermission
 import com.hana.reader.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -113,6 +114,7 @@ class ReadingService : Service() {
         const val ACTION_STOP = "com.hana.reader.STOP"
 
         fun start(context: Context) {
+            NotificationPermission.requestOnceIfNeeded(context)
             val intent = Intent(context, ReadingService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
             else context.startService(intent)

@@ -11,8 +11,8 @@ A calm Android ebook reader that reads to you in a warm female voice. Built for 
   - English **Warm**: **Piper** `en_US-amy-medium` — softer, commas kept, lower buzz
 - Falls back to the device TTS voice if the neural pack is missing (including Indonesian books)
 - Google sign-in + local progress saving
-- Import `.epub`, `.txt`, or Markdown
-- English and Indonesian library to start
+- **Add your book** first after login (EPUB / TXT / Markdown); built-in library is secondary
+- English and Indonesian sample library to start
 
 ## Download the APK
 
@@ -36,9 +36,9 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 ## Voice
 
-Tap **Listen**. The first English book downloads **Smooth** (~67 MB). **Warm** (~64 MB) is optional in Voices if you want a softer voice. Indonesian books use the device System TTS for now. After the English pack is installed, listening works in airplane mode.
+Tap **Listen** when you are ready — the first English voice download is intentional, with a clear **%** progress (Smooth ~67 MB). **Warm** (~64 MB) is optional in Voices / MiniPlayer. Indonesian books use the device System TTS for now. After the English pack is installed, listening works in airplane mode.
 
-Listen follows the Piper mobile guide: Smooth is slower (length 1.15), Warm is Amy at 1.20 with cleaner noise, and every sentence gets a 400ms breath. English chunks prefer whole sentences under ~300 characters so Warm does not jump mid-sentence.
+Listen follows the Piper mobile guide: Smooth is the default (length 1.15), Warm is Amy at 1.15 with lower noise, and every sentence gets a 400ms breath. English chunks prefer whole sentences under ~300 characters so Warm does not jump mid-sentence. The reader auto-scrolls to the active sentence without claiming word-level highlight sync.
 
 Tap the caption on the mini player to switch **Hana · neural** (Piper) and **Device** (system TTS).
 
