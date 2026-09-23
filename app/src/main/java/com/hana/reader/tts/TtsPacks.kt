@@ -27,11 +27,13 @@ object TtsPacks {
     const val COMMA_PAUSE_MS = 180
     const val BREATH_PAUSE_MS = 40
     const val RETIRED_KOKORO_STORAGE_KEY = "en"
+    /** Retired Warm (Amy) pack — kept for orphaned on-disk cleanup / ignore. */
+    const val RETIRED_WARM_STORAGE_KEY = "en-amy"
+    const val RETIRED_WARM_PACK_ID = "piper-en-amy-medium"
 
     /**
      * Piper VITS knobs from the mobile config guide.
-     * Smooth: slightly slower, crisp rhythm.
-     * Warm (Amy): 1.20 length, default noise, slightly looser duration.
+     * Smooth (only offline EN): slightly slower pace, modest texture/breath.
      */
     data class Acoustic(
         val lengthScale: Float,
@@ -39,12 +41,10 @@ object TtsPacks {
         val noiseScaleW: Float,
     )
 
-    val SMOOTH_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.667f, noiseScaleW = 0.70f)
-    /** Cleaner Warm: quieter buzz (noise 0.42 / 0.48); packId unchanged. */
-    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.42f, noiseScaleW = 0.48f)
+    /** Pace 1.20 + slight texture/breath for character; stay below Warm-era buzz. */
+    val SMOOTH_ACOUSTIC = Acoustic(lengthScale = 1.20f, noiseScale = 0.70f, noiseScaleW = 0.75f)
 
     fun acousticFor(packId: String): Acoustic = when (packId) {
-        EN_WARM.packId -> WARM_ACOUSTIC
         else -> SMOOTH_ACOUSTIC
     }
 
@@ -59,35 +59,25 @@ object TtsPacks {
         storageKey = "en-smooth"
     )
 
-    /** Warmer English Piper — same speed class as Smooth, replaces Kokoro/Bella. */
-    val EN_WARM = TtsPack(
-        language = "en",
-        kind = NeuralKind.Piper,
-        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-medium.tar.bz2",
-        archiveName = "vits-piper-en_US-amy-medium.tar.bz2",
-        minArchiveBytes = 40L * 1024 * 1024,
-        packId = "piper-en-amy-medium",
-        displayName = "Warm",
-        storageKey = "en-amy"
-    )
-
-    fun all(): List<TtsPack> = listOf(EN_SMOOTH, EN_WARM)
+    fun all(): List<TtsPack> = listOf(EN_SMOOTH)
 
     fun forLanguage(language: String): TtsPack? = when (language) {
         "en", "en-smooth" -> EN_SMOOTH
-        "en-amy" -> EN_WARM
+        // Retired Warm storage key — do not reintroduce Amy; resolve to Smooth for callers.
+        "en-amy" -> null
         else -> null
     }
 
     fun packsForLanguage(language: String): List<TtsPack> = when (language) {
-        "en" -> listOf(EN_SMOOTH, EN_WARM)
+        "en" -> listOf(EN_SMOOTH)
         else -> emptyList()
     }
 
     fun packById(packId: String): TtsPack? = all().firstOrNull { it.packId == packId }
 
     fun packForVoice(voiceId: String?): TtsPack? {
-        val voice = voiceId?.let { VoiceCatalog.find(it) } ?: return null
+        val canonical = voiceId?.let { VoiceCatalog.canonicalId(it) }
+        val voice = canonical?.let { VoiceCatalog.find(it) } ?: return null
         return packById(voice.packId) ?: forLanguage(voice.language)
     }
 
@@ -96,7 +86,10 @@ object TtsPacks {
     }
 
     fun voiceName(language: String, profile: VoiceProfile, selectedId: String? = null): String {
-        if (selectedId != null) return VoiceCatalog.find(selectedId)?.name ?: selectedId
+        if (selectedId != null) {
+            val id = VoiceCatalog.canonicalId(selectedId)
+            return VoiceCatalog.find(id)?.name ?: id
+        }
         return "lessac"
     }
 
@@ -104,7 +97,6 @@ object TtsPacks {
     /** Approximate on-disk size shown during consented first download. */
     fun approxDownloadMb(pack: TtsPack): Int = when (pack.packId) {
         EN_SMOOTH.packId -> 67
-        EN_WARM.packId -> 64
         else -> 60
     }
 
@@ -148,7 +140,7 @@ object TtsPacks {
         }
         return when {
             profile == VoiceProfile.Hana && usingNeural -> {
-                val voice = VoiceCatalog.find(selectedVoiceId.orEmpty())
+                val voice = VoiceCatalog.find(VoiceCatalog.canonicalId(selectedVoiceId.orEmpty()))
                 val pack = voice?.let { packById(it.packId) } ?: forLanguage(language)
                 val engine = pack?.displayName ?: "Neural"
                 val name = selectedVoiceName ?: voiceName(language, profile)

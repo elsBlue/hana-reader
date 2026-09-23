@@ -25,8 +25,8 @@ class VoiceSwitchLogicTest {
     fun forLanguageVsPackForVoice() {
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.forLanguage("en"))
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
-        assertEquals(TtsPacks.EN_WARM, TtsPacks.packForVoice("en_amy"))
-        assertEquals(TtsPacks.EN_WARM.storageKey, TtsPacks.packForVoice("en_amy")!!.storageKey)
+        // Retired Warm id still resolves to Smooth pack (no crash).
+        assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_amy"))
         assertNull(TtsPacks.packForVoice("id_news"))
         assertNull(TtsPacks.packForVoice("id_cerita"))
     }
@@ -34,12 +34,14 @@ class VoiceSwitchLogicTest {
 
     @Test
     fun warmPrepareOnlyWhenFinishedPackMatchesSelectedVoice() {
-        val warmKey = TtsPacks.EN_WARM.storageKey
         val smoothKey = TtsPacks.EN_SMOOTH.storageKey
-        assertTrue(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(warmKey, "en_amy"))
-        assertFalse(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(warmKey, "en_lessac"))
-        assertFalse(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(smoothKey, "en_amy"))
-        assertFalse(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(warmKey, null))
+        val retiredWarmKey = TtsPacks.RETIRED_WARM_STORAGE_KEY
+        assertTrue(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(smoothKey, "en_lessac"))
+        assertFalse(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(retiredWarmKey, "en_lessac"))
+        // en_amy canonicalizes to Smooth → prepare only when Smooth pack finished.
+        assertTrue(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(smoothKey, "en_amy"))
+        assertFalse(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(retiredWarmKey, "en_amy"))
+        assertFalse(VoiceSwitchLogic.shouldWarmPrepareAfterDownload(smoothKey, null))
     }
 
 
@@ -51,8 +53,8 @@ class VoiceSwitchLogicTest {
 
     @Test
     fun queueFillOnlyForActivePack() {
-        assertTrue(VoiceSwitchLogic.maySynthForQueue(null, "piper-en-amy-medium"))
-        assertTrue(VoiceSwitchLogic.maySynthForQueue("piper-en-amy-medium", "piper-en-amy-medium"))
-        assertFalse(VoiceSwitchLogic.maySynthForQueue("piper-en-lessac-medium", "piper-en-amy-medium"))
+        assertTrue(VoiceSwitchLogic.maySynthForQueue(null, "piper-en-lessac-medium"))
+        assertTrue(VoiceSwitchLogic.maySynthForQueue("piper-en-lessac-medium", "piper-en-lessac-medium"))
+        assertFalse(VoiceSwitchLogic.maySynthForQueue("piper-en-lessac-medium", "other-pack"))
     }
 }

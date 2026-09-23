@@ -107,7 +107,7 @@ fun VoiceSettingsSheet(
                 color = Ink,
             )
             Text(
-                "Lower Texture to reduce Warm buzz. Pitch isn’t available for offline Hana voices.",
+                "Raise Pace / Breath for more character; lower Texture if you hear grain. Pitch isn’t available for offline Hana voices.",
                 color = Muted,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),

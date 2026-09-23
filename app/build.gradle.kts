@@ -22,8 +22,8 @@ android {
         applicationId = "com.hana.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.5.1"
+        versionCode = 17
+        versionName = "1.5.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a")

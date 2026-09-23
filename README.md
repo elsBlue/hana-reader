@@ -7,8 +7,7 @@ A calm Android ebook reader that reads to you in a warm female voice. Built for 
 - Minimal library + reader
 - **Listen like music**: lock the phone, Hana keeps reading from a notification
 - **Offline neural voices** after one download (English only for now)
-  - English **Smooth** (default Listen): **Piper** `en_US-lessac-medium` — slower, with pauses
-  - English **Warm**: **Piper** `en_US-amy-medium` — softer, commas kept, lower buzz
+  - English **Smooth** (only offline EN neural): **Piper** `en_US-lessac-medium` — slower, with pauses
 - Falls back to the device TTS voice if the neural pack is missing (including Indonesian books)
 - Google sign-in + local progress saving
 - **Add your book** first after login (EPUB / TXT / Markdown); built-in library is secondary
@@ -36,13 +35,13 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 ## Voice
 
-Tap **Listen** when you are ready — the first English voice download is intentional, with a clear **%** progress (Smooth ~67 MB). **Warm** (~64 MB) is optional in Voices / MiniPlayer. Indonesian books use the device System TTS for now. After the English pack is installed, listening works in airplane mode.
+Tap **Listen** when you are ready — the first English voice download is intentional, with a clear **%** progress (Smooth ~67 MB). Indonesian books use the device System TTS for now. After the English pack is installed, listening works in airplane mode.
 
-Listen follows the Piper mobile guide: Smooth is the default (length 1.15), Warm is Amy at 1.15 with lower noise, and every sentence gets a 400ms breath. English chunks prefer whole sentences under ~300 characters so Warm does not jump mid-sentence. The reader auto-scrolls to the active sentence without claiming word-level highlight sync.
+Listen follows the Piper mobile guide: Smooth is the only offline English neural (length 1.20 factory Pace, modest Texture/Breath), and every sentence gets a 400ms breath. English chunks prefer whole sentences under ~300 characters. The reader auto-scrolls to the active sentence without claiming word-level highlight sync.
 
 Tap the caption on the mini player to switch **Hana · neural** (Piper) and **Device** (system TTS).
 
-**Voice settings** (Voices screen → tune icon, or MiniPlayer → tune): Speed, Pace, Texture, and Breath. Lower Texture to reduce Warm buzz. Pitch is not available for offline Hana voices. Settings persist per voice (Smooth / Warm).
+**Voice settings** (Voices screen → tune icon, or MiniPlayer → tune): Speed, Pace, Texture, and Breath for Smooth. Pitch is not available for offline Hana voices. Settings persist per voice.
 
 The web preview uses the browser voice. This Android app uses sherpa-onnx so playback still works with the screen locked.
 

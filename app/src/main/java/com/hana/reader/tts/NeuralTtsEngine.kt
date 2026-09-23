@@ -80,7 +80,7 @@ class NeuralTtsEngine {
             current.generateWithConfig(text = text, config = gen)
         }
         if (isSilent(audio.samples)) {
-            error("This voice produced silence — try Smooth or Warm")
+            error("This voice produced silence — try Smooth or System TTS")
         }
         return PcmAudio(softNormalize(audio.samples), audio.sampleRate)
     }
@@ -253,7 +253,7 @@ class NeuralTtsEngine {
             if (a > peak) peak = a
         }
         if (peak < 1e-4f) return samples
-        // Leave headroom so Warm / Amy peaks don't grit in PCM16.
+        // Leave headroom so Piper peaks don't grit in PCM16.
         val target = 0.85f
         if (peak <= target) return samples
         val scale = target / peak

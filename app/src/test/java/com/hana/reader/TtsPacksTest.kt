@@ -26,7 +26,7 @@ class TtsPacksTest {
     fun indonesianNeuralPackRemoved() {
         assertNull(TtsPacks.forLanguage("id"))
         assertTrue(TtsPacks.packsForLanguage("id").isEmpty())
-        assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN_WARM), TtsPacks.all())
+        assertEquals(listOf(TtsPacks.EN_SMOOTH), TtsPacks.all())
         assertNull(TtsPacks.packForVoice("id_news"))
         assertNull(TtsPacks.packForVoice("id_cerita"))
     }
@@ -90,28 +90,15 @@ class TtsPacksTest {
     }
 
     @Test
-    fun warmEnglishIsPiperAmy() {
-        val pack = TtsPacks.forLanguage("en-amy")!!
-        assertEquals(NeuralKind.Piper, pack.kind)
-        assertEquals("en-amy", pack.storageKey)
-        assertEquals("piper-en-amy-medium", pack.packId)
-        assertTrue(pack.url.contains("en_US-amy-medium"))
-        assertFalse(pack.url.contains("int8"))
+    fun warmAmyPackRemoved() {
+        assertNull(TtsPacks.forLanguage("en-amy"))
+        assertNull(TtsPacks.packById(TtsPacks.RETIRED_WARM_PACK_ID))
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
-        assertEquals(TtsPacks.EN_WARM, TtsPacks.packForVoice("en_amy"))
+        // Retired Warm id canonicalizes to Smooth pack.
+        assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_amy"))
         assertNull(TtsPacks.packForVoice("af_bella"))
-        assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN_WARM), TtsPacks.packsForLanguage("en"))
-        val caption = TtsPacks.playerCaption(
-            "en",
-            VoiceProfile.Hana,
-            usingNeural = true,
-            downloading = false,
-            status = null,
-            selectedVoiceName = "amy",
-            selectedVoiceId = "en_amy"
-        )
-        assertTrue(caption.contains("Warm"))
-        assertTrue(caption.contains("amy"))
+        assertEquals(listOf(TtsPacks.EN_SMOOTH), TtsPacks.packsForLanguage("en"))
+        assertEquals("en-amy", TtsPacks.RETIRED_WARM_STORAGE_KEY)
     }
 
     @Test
@@ -121,21 +108,18 @@ class TtsPacksTest {
         assertEquals(400, TtsPacks.SENTENCE_PAUSE_MS)
         assertEquals(180, TtsPacks.COMMA_PAUSE_MS)
         val smooth = TtsPacks.acousticFor(TtsPacks.EN_SMOOTH.packId)
-        assertEquals(1.15f, smooth.lengthScale)
-        assertEquals(0.667f, smooth.noiseScale)
-        assertEquals(0.70f, smooth.noiseScaleW)
-        val warm = TtsPacks.acousticFor(TtsPacks.EN_WARM.packId)
-        assertEquals(1.15f, warm.lengthScale)
-        assertEquals(0.42f, warm.noiseScale)
-        assertEquals(0.48f, warm.noiseScaleW)
-        // Unknown pack ids fall back to Smooth acoustics (no ID pack).
+        assertEquals(1.20f, smooth.lengthScale)
+        assertEquals(0.70f, smooth.noiseScale)
+        assertEquals(0.75f, smooth.noiseScaleW)
+        // Retired Warm / unknown pack ids fall back to Smooth acoustics.
+        assertEquals(TtsPacks.SMOOTH_ACOUSTIC, TtsPacks.acousticFor(TtsPacks.RETIRED_WARM_PACK_ID))
         val fallback = TtsPacks.acousticFor("piper-id-news-medium")
         assertEquals(TtsPacks.SMOOTH_ACOUSTIC, fallback)
     }
 
     @Test
     fun busyMessageIsCalm() {
-        assertEquals("Preparing Warm…", TtsPacks.busyMessage("Warm", "en", downloading = false))
+        assertEquals("Preparing Smooth…", TtsPacks.busyMessage("Smooth", "en", downloading = false))
         assertEquals(
             "Downloading Soft for offline listening (~67 MB)",
             TtsPacks.busyMessage("Soft", "en", downloading = true)
@@ -146,7 +130,6 @@ class TtsPacksTest {
             TtsPacks.downloadStatus(TtsPacks.EN_SMOOTH, 0.42f)
         )
         assertEquals(67, TtsPacks.approxDownloadMb(TtsPacks.EN_SMOOTH))
-        assertEquals(64, TtsPacks.approxDownloadMb(TtsPacks.EN_WARM))
     }
 
     @Test
@@ -157,8 +140,8 @@ class TtsPacksTest {
         assertEquals("model.onnx", TtsPacks.safeTarRelative("model.onnx"))
         assertEquals("model.onnx", TtsPacks.safeTarRelative("./model.onnx"))
         assertEquals(
-            "vits-piper-en_US-amy-medium/en_US-amy-medium.onnx",
-            TtsPacks.safeTarRelative("vits-piper-en_US-amy-medium/en_US-amy-medium.onnx")
+            "vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx",
+            TtsPacks.safeTarRelative("vits-piper-en_US-lessac-medium/en_US-lessac-medium.onnx")
         )
     }
 }
