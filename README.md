@@ -10,8 +10,9 @@ A calm Android ebook reader that reads to you in a warm female voice. Built for 
   - English **Smooth** (only offline EN neural): **Piper** `en_US-lessac-medium` — slower, with pauses
 - Falls back to the device TTS voice if the neural pack is missing (including Indonesian books)
 - Google sign-in + local progress saving
-- **Add your book** first after login (EPUB / TXT / Markdown); built-in library is secondary
+- **+** in the Library top bar to add a book (EPUB / TXT / Markdown); list shows number + title; covers appear inside the Reader
 - English and Indonesian sample library to start
+- Swipe or long-press an imported book to delete it (with confirm)
 
 ## Download the APK
 

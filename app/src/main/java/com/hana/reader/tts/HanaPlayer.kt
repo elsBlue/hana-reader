@@ -117,6 +117,17 @@ class HanaPlayer(context: Context) {
         persist()
     }
 
+    /** Stop and drop player state when an imported book is deleted from the library. */
+    fun releaseBook(bookId: String) {
+        if (_state.value.book?.id != bookId) return
+        pause()
+        ReadingService.stop(appContext)
+        _state.value = PlayerSnapshot(
+            profile = _state.value.profile,
+            rate = _state.value.rate
+        )
+    }
+
     fun skipSentence(delta: Int) {
         val snap = _state.value
         val book = snap.book ?: return
