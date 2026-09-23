@@ -8,6 +8,10 @@ class ProgressStore(context: Context) {
     private val prefs = context.getSharedPreferences("hana", Context.MODE_PRIVATE)
     private val coversDir = File(context.filesDir, "covers").also { it.mkdirs() }
 
+    init {
+        purgeFormerBuiltIns()
+    }
+
     fun session(): Session {
         return Session(
             email = prefs.getString("email", null),
@@ -94,12 +98,11 @@ class ProgressStore(context: Context) {
             .apply()
     }
 
-    /** True when the book was user-imported (deletable). Built-ins stay. */
+    /** True when the book was user-imported (deletable). */
     fun isImported(bookId: String): Boolean = importedIds().contains(bookId)
 
     /**
      * Removes an imported book, its progress, and any cached cover file.
-     * Built-in titles are not removed.
      */
     fun removeImported(bookId: String): Boolean {
         if (!isImported(bookId)) return false
@@ -147,9 +150,31 @@ class ProgressStore(context: Context) {
         }.getOrNull()
     }
 
-    fun allBooks(): List<Book> = imported() + Library.books
+    /** Catalog is imports only — no built-in samples. */
+    fun allBooks(): List<Book> = imported()
 
-    fun book(id: String): Book? = importedBook(id) ?: Library.get(id)
+    fun book(id: String): Book? = importedBook(id)
+
+    /**
+     * One-shot: drop leftover progress (and any accidental import) for
+     * former built-in sample ids so upgrades land on an empty library.
+     */
+    private fun purgeFormerBuiltIns() {
+        if (prefs.getBoolean("purged_builtins_v156", false)) return
+        val editor = prefs.edit()
+        for (id in Library.formerBuiltInIds) {
+            editor.remove("p_$id")
+            if (isImported(id)) {
+                // removeImported needs apply mid-loop; clear prefs keys here
+                editor.remove("b_$id")
+                coverFileFor(id).delete()
+            }
+        }
+        val ids = importedIds().filterNot { it in Library.formerBuiltInIds }
+        editor.putString("imported_ids", ids.joinToString(","))
+        editor.putBoolean("purged_builtins_v156", true)
+        editor.apply()
+    }
 
     private fun importedIds(): List<String> =
         prefs.getString("imported_ids", "")

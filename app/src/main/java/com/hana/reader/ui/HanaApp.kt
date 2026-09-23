@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -236,8 +237,7 @@ private fun LoginScreen(
 private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: String?) {
     val context = LocalContext.current
     var books by remember { mutableStateOf(store.allBooks()) }
-    val imported = remember(books) { store.imported() }
-    // CONTINUE only for real saved progress — never force first built-in (avoids voice prep).
+    // CONTINUE only for real saved progress on an imported book.
     val continueBook = remember(books) { store.latest()?.let { store.book(it.bookId) } }
     val player = HanaPlayer.get(context)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -287,7 +287,12 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
             .statusBarsPadding()
             .padding(horizontal = 20.dp)
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Column(Modifier.weight(1f)) {
                 Text("HANA", color = Muted, fontSize = 11.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Medium)
                 Text(
@@ -304,6 +309,13 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                 Icon(Icons.Default.RecordVoiceOver, contentDescription = "Voices", tint = Ink)
             }
         }
+        // Soft cream/ink hairline under the top bar before content
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Ink.copy(alpha = 0.10f))
+        )
         if (error != null) {
             Text(error!!, color = Rose, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         }
@@ -342,34 +354,55 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                     }
                 }
             }
-        } else if (imported.isEmpty()) {
-            Text(
-                "Tap + to add EPUB, TXT, or Markdown. Built-in samples are listed below.",
-                color = Muted,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 12.dp)
-            )
         }
-        Text(
-            "BOOKS",
-            color = Muted,
-            fontSize = 11.sp,
-            letterSpacing = 1.6.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-        )
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = 96.dp)
-        ) {
-            itemsIndexed(books, key = { _, book -> book.id }) { index, book ->
-                LibraryBookListItem(
-                    number = index + 1,
-                    book = book,
-                    canDelete = store.isImported(book.id),
-                    onOpen = { nav.navigate("read/${book.id}") },
-                    onRequestDelete = { pendingDelete = book }
+        if (books.isEmpty()) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "Perpustakaan masih kosong.",
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 20.sp,
+                    color = Ink,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
+                Text(
+                    "Ketuk + untuk menambahkan buku — EPUB, TXT, atau Markdown.\nYour library is quiet. Tap + to add a book.",
+                    color = Muted,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+        } else {
+            Text(
+                "BOOKS",
+                color = Muted,
+                fontSize = 11.sp,
+                letterSpacing = 1.6.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+            )
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 96.dp)
+            ) {
+                itemsIndexed(books, key = { _, book -> book.id }) { index, book ->
+                    LibraryBookListItem(
+                        number = index + 1,
+                        book = book,
+                        canDelete = store.isImported(book.id),
+                        onOpen = { nav.navigate("read/${book.id}") },
+                        onRequestDelete = { pendingDelete = book }
+                    )
+                }
             }
         }
     }
