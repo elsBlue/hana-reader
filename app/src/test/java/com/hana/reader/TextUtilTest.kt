@@ -291,7 +291,9 @@ class TextUtilTest {
 
     @Test
     fun firstAndLaterEnChunksShareBudget() {
-        val long = ("Words without commas just keep going past the continuous english budget into another phrase of the story here. " * 4).trim()
+        val long = List(4) {
+            "Words without commas just keep going past the continuous english budget into another phrase of the story here."
+        }.joinToString(" ").trim()
         val first = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = TextUtil.EN_CHUNK_MAX_CHARS, isFirst = true)
         val later = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = TextUtil.EN_CHUNK_MAX_CHARS, isFirst = false)
         assertTrue(first.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
