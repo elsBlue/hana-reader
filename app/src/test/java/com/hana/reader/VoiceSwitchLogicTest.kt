@@ -27,8 +27,8 @@ class VoiceSwitchLogicTest {
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
         // Retired Warm id still resolves to Smooth pack (no crash).
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_amy"))
-        assertNull(TtsPacks.packForVoice("id_news"))
-        assertNull(TtsPacks.packForVoice("id_cerita"))
+        assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("id_news"))
+        assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("id_cerita"))
     }
 
 
