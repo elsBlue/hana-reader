@@ -5,15 +5,18 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,14 +26,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -38,16 +41,21 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +86,7 @@ import com.hana.reader.auth.GoogleAuth
 import com.hana.reader.auth.GoogleSignInOutcome
 import com.hana.reader.data.Book
 import com.hana.reader.data.Chapter
+import com.hana.reader.data.EpubImport
 import com.hana.reader.data.ProgressStore
 import com.hana.reader.data.TextUtil
 import com.hana.reader.tts.HanaPlayer
@@ -87,7 +96,6 @@ import com.hana.reader.tts.VoiceProfile
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.util.zip.ZipInputStream
 
 @Composable
 fun HanaApp() {
@@ -223,14 +231,14 @@ private fun LoginScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: String?) {
     val context = LocalContext.current
-    var filter by remember { mutableStateOf("all") }
     var books by remember { mutableStateOf(store.allBooks()) }
     val imported = remember(books) { store.imported() }
     // CONTINUE only for real saved progress — never force first built-in (avoids voice prep).
-    val continueBook = store.latest()?.let { store.book(it.bookId) }
+    val continueBook = remember(books) { store.latest()?.let { store.book(it.bookId) } }
     val player = HanaPlayer.get(context)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -244,6 +252,7 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
     }
     // No Library auto warmPrepare / Smooth download — wait for Listen or Voices.
     var error by remember { mutableStateOf<String?>(null) }
+    var pendingDelete by remember { mutableStateOf<Book?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val activity = GoogleAuth.findActivity(context) ?: return@rememberLauncherForActivityResult
@@ -264,6 +273,13 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
             "text/x-markdown"
         ))
     }
+    fun confirmDelete(book: Book) {
+        if (player.state.value.book?.id == book.id) player.releaseBook(book.id)
+        if (store.removeImported(book.id)) {
+            books = store.allBooks()
+        }
+        pendingDelete = null
+    }
 
     Column(
         Modifier
@@ -281,109 +297,199 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                     color = Ink
                 )
             }
+            IconButton(onClick = openImport) {
+                Icon(Icons.Default.Add, contentDescription = "Add your book", tint = Ink)
+            }
             IconButton(onClick = { nav.navigate("voices") }) {
                 Icon(Icons.Default.RecordVoiceOver, contentDescription = "Voices", tint = Ink)
             }
         }
-        // Primary post-login action: upload-first.
-        Button(
-            onClick = openImport,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp)
-                .height(52.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = PaperElevated),
-            shape = CircleShape
-        ) {
-            Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Add your book", fontWeight = FontWeight.Medium, fontSize = 16.sp)
-        }
-        Text(
-            "EPUB, TXT, or Markdown · then Listen when you are ready",
-            color = Muted,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(top = 8.dp)
-        )
         if (error != null) {
             Text(error!!, color = Rose, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         }
         if (continueBook != null) {
             Surface(
                 modifier = Modifier
-                    .padding(top = 20.dp)
+                    .padding(top = 12.dp)
                     .fillMaxWidth()
                     .clickable { nav.navigate("read/${continueBook.id}") },
                 color = PaperElevated,
-                shape = RoundedCornerShape(24.dp),
-                shadowElevation = 2.dp
+                shape = RoundedCornerShape(16.dp),
+                shadowElevation = 1.dp
             ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Cover(continueBook, Modifier.size(64.dp, 86.dp))
-                    Spacer(Modifier.width(14.dp))
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Column(Modifier.weight(1f)) {
-                        Text("CONTINUE", color = Muted, fontSize = 11.sp, letterSpacing = 1.6.sp)
-                        Text(continueBook.title, fontFamily = FontFamily.Serif, fontSize = 18.sp, maxLines = 2)
-                        Text(continueBook.author, color = Muted, fontSize = 13.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                player.play(continueBook)
-                                nav.navigate("read/${continueBook.id}")
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Rose),
-                            shape = CircleShape,
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
-                            Icon(Icons.Default.Headphones, null, Modifier.size(14.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Listen")
-                        }
+                        Text("CONTINUE", color = Muted, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                        Text(
+                            continueBook.title,
+                            fontFamily = FontFamily.Serif,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            player.play(continueBook)
+                            nav.navigate("read/${continueBook.id}")
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.Default.Headphones, contentDescription = "Listen", tint = Rose)
                     }
                 }
             }
         } else if (imported.isEmpty()) {
             Text(
-                "Your imported books will show here. Built-in titles are below if you want a sample.",
+                "Tap + to add EPUB, TXT, or Markdown. Built-in samples are listed below.",
                 color = Muted,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(top = 16.dp)
+                modifier = Modifier.padding(top = 12.dp)
             )
         }
-        Row(Modifier.padding(top = 18.dp, bottom = 8.dp)) {
-            listOf("all" to "All", "en" to "English", "id" to "Indonesia").forEach { (key, label) ->
-                val on = filter == key
-                Text(
-                    label,
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .clip(CircleShape)
-                        .background(if (on) Ink else Subtle)
-                        .clickable { filter = key }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    color = if (on) Paper else Muted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+        Text(
+            "BOOKS",
+            color = Muted,
+            fontSize = 11.sp,
+            letterSpacing = 1.6.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+        )
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 96.dp)
+        ) {
+            itemsIndexed(books, key = { _, book -> book.id }) { index, book ->
+                LibraryBookListItem(
+                    number = index + 1,
+                    book = book,
+                    canDelete = store.isImported(book.id),
+                    onOpen = { nav.navigate("read/${book.id}") },
+                    onRequestDelete = { pendingDelete = book }
                 )
             }
         }
-        // Imported first (allBooks already orders imported + built-in).
-        val visible = books.filter { filter == "all" || it.language == filter }
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(visible, key = { it.id }) { book ->
-                Column(Modifier.clickable { nav.navigate("read/${book.id}") }) {
-                    Cover(book, Modifier.fillMaxWidth().aspectRatio(3f / 4f))
-                    Text(book.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
-                    Text("${book.author} · ${book.language.uppercase()}", color = Muted, fontSize = 12.sp, maxLines = 1)
+    }
+    pendingDelete?.let { book ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Hapus buku?") },
+            text = {
+                Text("“${book.title}” akan dihapus dari perpustakaan, beserta progresnya.")
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete(book) }) {
+                    Text("Hapus", color = Rose)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text("Batal", color = Muted)
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun LibraryBookListItem(
+    number: Int,
+    book: Book,
+    canDelete: Boolean,
+    onOpen: () -> Unit,
+    onRequestDelete: () -> Unit
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (!canDelete) return@rememberSwipeToDismissBoxState false
+            if (value == SwipeToDismissBoxValue.EndToStart ||
+                value == SwipeToDismissBoxValue.StartToEnd
+            ) {
+                onRequestDelete()
+                false
+            } else true
         }
+    )
+    if (!canDelete) {
+        LibraryBookRow(
+            number = number,
+            book = book,
+            onOpen = onOpen,
+            onRequestDelete = null
+        )
+    } else {
+        SwipeToDismissBox(
+            state = dismissState,
+            backgroundContent = {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(vertical = 2.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Rose.copy(alpha = 0.12f))
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = Rose)
+                }
+            },
+            enableDismissFromStartToEnd = true,
+            enableDismissFromEndToStart = true
+        ) {
+            LibraryBookRow(
+                number = number,
+                book = book,
+                onOpen = onOpen,
+                onRequestDelete = onRequestDelete
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LibraryBookRow(
+    number: Int,
+    book: Book,
+    onOpen: () -> Unit,
+    onRequestDelete: (() -> Unit)?
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (onRequestDelete != null) {
+                    Modifier.combinedClickable(
+                        onClick = onOpen,
+                        onLongClick = onRequestDelete
+                    )
+                } else {
+                    Modifier.clickable(onClick = onOpen)
+                }
+            )
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "%d".format(number),
+            color = Muted,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(28.dp)
+        )
+        Text(
+            book.title,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            fontFamily = FontFamily.Serif,
+            fontSize = 17.sp,
+            color = Ink
+        )
     }
 }
 
@@ -722,21 +828,35 @@ private fun VoiceBusyOverlay() {
 
 @Composable
 private fun Cover(book: Book, modifier: Modifier = Modifier) {
-    Box(
-        modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(book.paper.toInt()))
-    ) {
-        Box(
-            Modifier
-                .width(6.dp)
-                .height(200.dp)
-                .background(Rose)
-                .align(Alignment.CenterStart)
+    val bitmap = remember(book.coverPath) {
+        book.coverPath
+            ?.takeIf { it.isNotBlank() }
+            ?.let { path -> runCatching { BitmapFactory.decodeFile(path) }.getOrNull() }
+    }
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = book.title,
+            contentScale = ContentScale.Crop,
+            modifier = modifier.clip(RoundedCornerShape(8.dp))
         )
-        Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
-            Text(book.author, color = Color(book.ink.toInt()).copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = FontFamily.Serif)
-            Text(book.title, color = Color(book.ink.toInt()), fontSize = 12.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium, maxLines = 3)
+    } else {
+        Box(
+            modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(book.paper.toInt()))
+        ) {
+            Box(
+                Modifier
+                    .width(6.dp)
+                    .height(200.dp)
+                    .background(Rose)
+                    .align(Alignment.CenterStart)
+            )
+            Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                Text(book.author, color = Color(book.ink.toInt()).copy(alpha = 0.7f), fontSize = 10.sp, fontFamily = FontFamily.Serif)
+                Text(book.title, color = Color(book.ink.toInt()), fontSize = 12.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium, maxLines = 3)
+            }
         }
     }
 }
@@ -762,18 +882,32 @@ private fun importUri(activity: Activity, uri: Uri, store: ProgressStore): Book 
     }
     val isEpub = lower.endsWith(".epub") ||
         (activity.contentResolver.getType(uri)?.contains("epub") == true)
-    val text = if (isEpub) readEpub(activity, uri) else readText(activity, uri)
-    val language = if (Regex("\\b(yang|dan|dengan|tidak|untuk)\\b", RegexOption.IGNORE_CASE).findAll(text.take(1500)).count() >= 4) "id" else "en"
+    val bookId = "imp-${System.currentTimeMillis()}"
+    var coverPath: String? = null
+    val textBody: String
+    if (isEpub) {
+        val bytes = activity.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: error("Could not open that EPUB.")
+        textBody = EpubImport.readTextChapters(bytes)
+        val coverBytes = EpubImport.extractCoverBytes(bytes)
+        if (coverBytes != null) {
+            coverPath = EpubImport.writeCoverFile(store.coverFileFor(bookId), coverBytes)
+        }
+    } else {
+        textBody = readText(activity, uri)
+    }
+    val language = if (Regex("\\b(yang|dan|dengan|tidak|untuk)\\b", RegexOption.IGNORE_CASE).findAll(textBody.take(1500)).count() >= 4) "id" else "en"
     val title = name.replace(Regex("\\.(epub|txt|md|markdown)$", RegexOption.IGNORE_CASE), "")
     val book = Book(
-        id = "imp-${System.currentTimeMillis()}",
+        id = bookId,
         title = title,
         author = "Imported",
         language = language,
-        blurb = text.take(120),
+        blurb = textBody.take(120),
         paper = 0xFFD8CFC3,
         ink = 0xFF2A241C,
-        chapters = listOf(Chapter("c1", title, text))
+        chapters = listOf(Chapter("c1", title, textBody)),
+        coverPath = coverPath
     )
     store.addImported(book)
     return book
@@ -783,33 +917,4 @@ private fun readText(activity: Activity, uri: Uri): String {
     activity.contentResolver.openInputStream(uri).use { input ->
         return BufferedReader(InputStreamReader(input)).readText()
     }
-}
-
-private fun readEpub(activity: Activity, uri: Uri): String {
-    val chunks = mutableListOf<String>()
-    activity.contentResolver.openInputStream(uri).use { input ->
-        ZipInputStream(input).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                val n = entry.name.lowercase()
-                if (!entry.isDirectory && (n.endsWith(".xhtml") || n.endsWith(".html") || n.endsWith(".htm"))) {
-                    val html = zip.readBytes().toString(Charsets.UTF_8)
-                    val body = html
-                        .replace(Regex("<script[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), " ")
-                        .replace(Regex("<style[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), " ")
-                        .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-                        .replace(Regex("</p>", RegexOption.IGNORE_CASE), "\n\n")
-                        .replace(Regex("<[^>]+>"), " ")
-                        .replace(Regex("&nbsp;"), " ")
-                        .replace(Regex("\\s+"), " ")
-                        .trim()
-                    if (body.length > 40) chunks.add(body)
-                }
-                zip.closeEntry()
-                entry = zip.nextEntry
-            }
-        }
-    }
-    if (chunks.isEmpty()) error("No readable chapters in that EPUB")
-    return chunks.joinToString("\n\n")
 }

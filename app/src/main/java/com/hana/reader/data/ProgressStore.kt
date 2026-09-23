@@ -2,9 +2,11 @@ package com.hana.reader.data
 
 import android.content.Context
 import org.json.JSONObject
+import java.io.File
 
 class ProgressStore(context: Context) {
     private val prefs = context.getSharedPreferences("hana", Context.MODE_PRIVATE)
+    private val coversDir = File(context.filesDir, "covers").also { it.mkdirs() }
 
     fun session(): Session {
         return Session(
@@ -61,6 +63,12 @@ class ProgressStore(context: Context) {
         prefs.edit().putString("p_${progress.bookId}", o.toString()).apply()
     }
 
+    fun clearProgress(bookId: String) {
+        prefs.edit().remove("p_$bookId").apply()
+    }
+
+    fun coverFileFor(bookId: String): File = File(coversDir, "$bookId.cover")
+
     fun addImported(book: Book) {
         val ids = importedIds().toMutableList()
         if (!ids.contains(book.id)) ids.add(book.id)
@@ -72,6 +80,7 @@ class ProgressStore(context: Context) {
             .put("blurb", book.blurb)
             .put("paper", book.paper)
             .put("ink", book.ink)
+        if (!book.coverPath.isNullOrBlank()) o.put("coverPath", book.coverPath)
         val chapters = org.json.JSONArray()
         book.chapters.forEach { ch ->
             chapters.put(
@@ -83,6 +92,30 @@ class ProgressStore(context: Context) {
             .putString("b_${book.id}", o.toString())
             .putString("imported_ids", ids.joinToString(","))
             .apply()
+    }
+
+    /** True when the book was user-imported (deletable). Built-ins stay. */
+    fun isImported(bookId: String): Boolean = importedIds().contains(bookId)
+
+    /**
+     * Removes an imported book, its progress, and any cached cover file.
+     * Built-in titles are not removed.
+     */
+    fun removeImported(bookId: String): Boolean {
+        if (!isImported(bookId)) return false
+        val ids = importedIds().toMutableList()
+        ids.remove(bookId)
+        coverFileFor(bookId).delete()
+        val existing = importedBook(bookId)
+        existing?.coverPath?.let { path ->
+            runCatching { File(path).takeIf { it.exists() && it.absolutePath != coverFileFor(bookId).absolutePath }?.delete() }
+        }
+        prefs.edit()
+            .remove("b_$bookId")
+            .remove("p_$bookId")
+            .putString("imported_ids", ids.joinToString(","))
+            .apply()
+        return true
     }
 
     fun imported(): List<Book> = importedIds().mapNotNull { importedBook(it) }
@@ -98,6 +131,8 @@ class ProgressStore(context: Context) {
                     add(Chapter(c.getString("id"), c.getString("title"), c.getString("body")))
                 }
             }
+            val cover = o.optString("coverPath", "").ifBlank { null }
+                ?: coverFileFor(id).takeIf { it.exists() }?.absolutePath
             Book(
                 id = o.getString("id"),
                 title = o.getString("title"),
@@ -106,7 +141,8 @@ class ProgressStore(context: Context) {
                 blurb = o.optString("blurb"),
                 paper = o.optLong("paper", 0xFFD8CFC3),
                 ink = o.optLong("ink", 0xFF2A241C),
-                chapters = list
+                chapters = list,
+                coverPath = cover
             )
         }.getOrNull()
     }

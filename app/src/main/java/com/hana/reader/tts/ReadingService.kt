@@ -119,5 +119,10 @@ class ReadingService : Service() {
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
             else context.startService(intent)
         }
+
+        fun stop(context: Context) {
+            val intent = Intent(context, ReadingService::class.java).setAction(ACTION_STOP)
+            context.startService(intent)
+        }
     }
 }

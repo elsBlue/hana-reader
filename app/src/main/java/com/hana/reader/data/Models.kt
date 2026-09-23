@@ -14,7 +14,9 @@ data class Book(
     val blurb: String,
     val paper: Long,
     val ink: Long,
-    val chapters: List<Chapter>
+    val chapters: List<Chapter>,
+    /** Absolute path to a cached cover image (Reader / mini-player only). Never used as Library list art. */
+    val coverPath: String? = null
 )
 
 data class ReadingProgress(
