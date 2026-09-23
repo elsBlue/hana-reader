@@ -65,6 +65,7 @@ class TtsModelManager(
 
     init {
         purgeRetiredKokoro()
+        purgeRetiredWarm()
     }
 
     fun isReady(language: String): Boolean {
@@ -262,6 +263,14 @@ class TtsModelManager(
         val looksRetired = marker.contains("kokoro") ||
             dir.walkTopDown().any { it.isFile && it.name == "voices.bin" }
         if (dir.isDirectory && looksRetired) {
+            dir.deleteRecursively()
+        }
+    }
+
+    /** Drop retired Warm (Amy) pack folder — Smooth is the only offline EN neural. */
+    private fun purgeRetiredWarm() {
+        val dir = File(root, TtsPacks.RETIRED_WARM_STORAGE_KEY)
+        if (dir.isDirectory) {
             dir.deleteRecursively()
         }
     }

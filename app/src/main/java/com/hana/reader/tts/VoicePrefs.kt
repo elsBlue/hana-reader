@@ -6,14 +6,18 @@ object VoiceDefaults {
     const val COMFORT_FLAG = "comfort_listen_v1"
     /** One-shot: drop retired Indonesian neural prefs (News/Cerita). */
     const val ID_RETIRED_FLAG = "id_neural_retired_v1"
+    /** One-shot: map retired Warm (Amy) selection to Smooth. */
+    const val WARM_RETIRED_FLAG = "warm_amy_retired_v1"
     @Deprecated("Use ID_RETIRED_FLAG")
     const val ID_CERITA_FLAG = "id_cerita_v1"
 
-    private val WARM_LEGACY_IDS = setOf(
+    /** Leftover Kokoro ids — previously mapped to Warm; now Smooth. */
+    private val KOKORO_LEGACY_IDS = setOf(
         "af_bella", "af_nicole", "af_sky", "bf_emma", "bf_isabella"
     )
 
     private val RETIRED_ID_IDS = setOf("id_news", "id_cerita")
+    private val RETIRED_WARM_IDS = setOf("en_amy")
 
     fun defaultId(language: String): String = "en_lessac"
 
@@ -27,10 +31,10 @@ object VoiceDefaults {
         return resolveEnglishId(saved)
     }
 
-    /** Map leftover Kokoro voice ids after the pack was removed. */
+    /** Map leftover Kokoro / retired Warm ids after those packs were removed. */
     fun resolveEnglishId(saved: String?): String {
         if (saved != null && VoiceCatalog.find(saved) != null) return saved
-        return if (saved in WARM_LEGACY_IDS) "en_amy" else "en_lessac"
+        return if (saved in KOKORO_LEGACY_IDS || saved in RETIRED_WARM_IDS) "en_lessac" else "en_lessac"
     }
 
     /**
@@ -43,6 +47,13 @@ object VoiceDefaults {
             ?: "en_lessac"
     }
 
+    /** Warm (Amy) retired — old prefs fall back to Smooth without crash. */
+    fun englishIdAfterWarmRetirement(saved: String?): String {
+        if (saved == null || saved in RETIRED_WARM_IDS) return "en_lessac"
+        return VoiceCatalog.canonicalId(saved).takeIf { VoiceCatalog.find(it) != null }
+            ?: resolveEnglishId(saved)
+    }
+
     @Deprecated("Indonesian neural retired", ReplaceWith("indonesianIdAfterRetirement(saved)"))
     fun indonesianIdAfterCeritaMigration(saved: String?): String = indonesianIdAfterRetirement(saved)
 }
@@ -53,6 +64,7 @@ class VoicePrefs(context: Context) {
     fun selectedVoiceId(language: String): String {
         migrateComfortOnce()
         migrateIdRetiredOnce()
+        migrateWarmRetiredOnce()
         // Neural catalog is English-only; ID books use System TTS (no neural pack).
         val keyLang = if (language == "id") "en" else language
         val key = key(keyLang)
@@ -82,6 +94,7 @@ class VoicePrefs(context: Context) {
             .putString(key(keyLang), VoiceCatalog.canonicalId(voiceId))
             .putBoolean(VoiceDefaults.COMFORT_FLAG, true)
             .putBoolean(VoiceDefaults.ID_RETIRED_FLAG, true)
+            .putBoolean(VoiceDefaults.WARM_RETIRED_FLAG, true)
             .apply()
     }
 
@@ -110,6 +123,21 @@ class VoicePrefs(context: Context) {
                     putString(key("en"), next)
                 }
             }
+            .apply()
+    }
+
+    private fun migrateWarmRetiredOnce() {
+        if (prefs.getBoolean(VoiceDefaults.WARM_RETIRED_FLAG, false)) return
+        val oldEn = prefs.getString(key("en"), null)
+        val next = VoiceDefaults.englishIdAfterWarmRetirement(oldEn)
+        prefs.edit()
+            .putBoolean(VoiceDefaults.WARM_RETIRED_FLAG, true)
+            .putString(key("en"), next)
+            // Drop orphaned per-voice Warm acoustic prefs if present.
+            .remove("voice_rate_en_amy")
+            .remove("voice_length_en_amy")
+            .remove("voice_noise_en_amy")
+            .remove("voice_noise_w_en_amy")
             .apply()
     }
 
@@ -183,4 +211,3 @@ class VoicePrefs(context: Context) {
 
     private fun key(language: String) = "voice_$language"
 }
-

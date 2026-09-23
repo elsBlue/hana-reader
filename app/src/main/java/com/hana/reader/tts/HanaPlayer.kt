@@ -164,7 +164,7 @@ class HanaPlayer(context: Context) {
     }
 
     /**
-     * Hana vs Clear only — not the Smooth↔Warm switch path.
+     * Hana vs Clear only — not the Voices pack switch path.
      * Cancels prebuffer/fill so a profile flip cannot race OfflineTts.
      */
     fun setProfile(profile: VoiceProfile) {
@@ -217,7 +217,7 @@ class HanaPlayer(context: Context) {
         reloadVoiceEngine(language, voiceId, "Applying voice texture…")
     }
 
-    /** Restore factory rate + Smooth/Warm acoustics for [voiceId], then reload. */
+    /** Restore factory rate + Smooth acoustics for [voiceId], then reload. */
     suspend fun resetVoiceSettings(language: String, voiceId: String) {
         voicePrefs.resetVoiceSettings(voiceId)
         val rate = voicePrefs.rateForVoice(voiceId)
@@ -1048,7 +1048,7 @@ class HanaPlayer(context: Context) {
             activePack(book.language).kind
         )
         // While finishing a hard-capped sentence, never pull in the *next* sentence
-        // (that was the Warm "loncat" — remainder + next spoken, then advance skipped).
+        // (that was the Amy "loncat" — remainder + next spoken, then advance skipped).
         val sentenceBudget = if (cursor.remainder != null) 1 else maxSentences
         val chunk = TextUtil.speakChunk(
             effectiveList,

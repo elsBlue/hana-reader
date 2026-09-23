@@ -7,17 +7,11 @@ sherpa-onnx
   Downloaded at build time:
   https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar
 
-Piper English voice (en_US-lessac-medium) — Smooth, default listen
+Piper English voice (en_US-lessac-medium) — Smooth, only offline English neural
   License: MIT (rhasspy/piper-voices catalog)
   https://huggingface.co/rhasspy/piper-voices
   Downloaded on first English listen:
   https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2
-
-Piper English voice (en_US-amy-medium) — Warm
-  License: MIT (rhasspy/piper-voices catalog)
-  https://huggingface.co/rhasspy/piper-voices
-  Downloaded from Voices when Warm is selected:
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-medium.tar.bz2
 
 Apache Commons Compress
   License: Apache-2.0

@@ -11,16 +11,16 @@ import org.junit.Test
 
 class VoiceCatalogTest {
     @Test
-    fun englishIsSmoothThenWarm() {
+    fun englishIsSmoothOnly() {
         val en = VoiceCatalog.ENGLISH
         assertEquals("en_lessac", en.first().id)
         assertEquals(TtsPacks.EN_SMOOTH.packId, en.first().packId)
-        assertEquals("en_amy", en[1].id)
-        assertEquals(TtsPacks.EN_WARM.packId, en[1].packId)
+        assertNull(VoiceCatalog.find("en_amy"))
         assertNull(VoiceCatalog.find("af"))
         assertNull(VoiceCatalog.find("af_bella"))
         assertFalse(en.any { it.id.startsWith("af_") })
-        assertEquals(2, en.size)
+        assertFalse(en.any { it.id == "en_amy" })
+        assertEquals(1, en.size)
         assertEquals(VoiceCatalog.ENGLISH, VoiceCatalog.all())
         assertTrue(VoiceCatalog.forLanguage("id").isEmpty())
     }
@@ -35,12 +35,15 @@ class VoiceCatalogTest {
     }
 
     @Test
-    fun leftoverKokoroWarmVoicesMapToAmy() {
-        assertEquals("en_amy", VoiceDefaults.resolveEnglishId("af_bella"))
-        assertEquals("en_amy", VoiceDefaults.resolveEnglishId("af_nicole"))
+    fun leftoverKokoroAndWarmMapToSmooth() {
+        assertEquals("en_lessac", VoiceDefaults.resolveEnglishId("af_bella"))
+        assertEquals("en_lessac", VoiceDefaults.resolveEnglishId("af_nicole"))
         assertEquals("en_lessac", VoiceDefaults.resolveEnglishId("am_adam"))
         assertEquals("en_lessac", VoiceDefaults.resolveEnglishId(null))
-        assertEquals("en_amy", VoiceDefaults.resolveEnglishId("en_amy"))
+        assertEquals("en_lessac", VoiceDefaults.resolveEnglishId("en_amy"))
+        assertEquals("en_lessac", VoiceDefaults.englishIdAfterWarmRetirement("en_amy"))
+        assertEquals("en_lessac", VoiceDefaults.englishIdAfterWarmRetirement(null))
+        assertEquals("en_lessac", VoiceCatalog.canonicalId("en_amy"))
     }
 
     @Test

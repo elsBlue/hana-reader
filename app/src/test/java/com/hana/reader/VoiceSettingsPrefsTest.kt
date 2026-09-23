@@ -24,22 +24,20 @@ class VoiceSettingsPrefsTest {
     }
 
     @Test
-    fun warmFactoryIsQuieterThanSmooth() {
+    fun smoothFactoryHasModestCharacter() {
         val smooth = TtsPacks.SMOOTH_ACOUSTIC
-        val warm = TtsPacks.WARM_ACOUSTIC
-        assertTrue(warm.noiseScale < smooth.noiseScale)
-        assertTrue(warm.noiseScaleW < smooth.noiseScaleW)
-        assertEquals(0.42f, warm.noiseScale)
-        assertEquals(0.48f, warm.noiseScaleW)
-        assertEquals(1.15f, warm.lengthScale)
-        assertEquals(1.15f, smooth.lengthScale)
+        assertEquals(1.20f, smooth.lengthScale)
+        assertEquals(0.70f, smooth.noiseScale)
+        assertEquals(0.75f, smooth.noiseScaleW)
+        assertTrue(smooth.noiseScale < VoicePrefs.NOISE_MAX)
+        assertTrue(smooth.noiseScaleW < VoicePrefs.NOISE_W_MAX)
     }
 
     @Test
     fun acousticEqualsSupportsReloadFingerprint() {
-        val a = TtsPacks.Acoustic(1.15f, 0.42f, 0.48f)
-        val b = TtsPacks.Acoustic(1.15f, 0.42f, 0.48f)
-        val c = TtsPacks.Acoustic(1.15f, 0.50f, 0.48f)
+        val a = TtsPacks.Acoustic(1.20f, 0.70f, 0.75f)
+        val b = TtsPacks.Acoustic(1.20f, 0.70f, 0.75f)
+        val c = TtsPacks.Acoustic(1.20f, 0.50f, 0.75f)
         assertEquals(a, b)
         assertTrue(a != c)
     }

@@ -149,7 +149,7 @@ fun VoicesScreen(nav: NavHostController) {
         }
 
         Text(
-            "Smooth is slower now so you can follow. Warm keeps the commas and sentence space.",
+            "Smooth is the offline English voice — slower, with pauses. Tweak Pace and Texture for more soul.",
             color = Muted,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
@@ -295,7 +295,6 @@ private fun PackCard(
 ) {
     val blurb = when (pack.packId) {
         TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · slower, with pauses"
-        TtsPacks.EN_WARM.packId -> "Piper Amy · ~64 MB · softer, commas kept"
         else -> "Piper · English voice pack"
     }
     Surface(
