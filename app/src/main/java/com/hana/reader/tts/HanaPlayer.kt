@@ -921,10 +921,13 @@ class HanaPlayer(context: Context) {
             cursor.isFirst,
             activePack(book.language).kind
         )
+        // While finishing a hard-capped sentence, never pull in the *next* sentence
+        // (that was the Warm "loncat" — remainder + next spoken, then advance skipped).
+        val sentenceBudget = if (cursor.remainder != null) 1 else maxSentences
         val chunk = TextUtil.speakChunk(
             effectiveList,
             se,
-            maxSentences = maxSentences,
+            maxSentences = sentenceBudget,
             maxChars = maxChars,
             isFirst = cursor.isFirst
         )
@@ -1146,10 +1149,11 @@ class HanaPlayer(context: Context) {
                     list
                 }
                 val (maxSentences, maxChars) = chunkLimits(language, first, kind)
+                val sentenceBudget = if (rem != null) 1 else maxSentences
                 val chunk = TextUtil.speakChunk(
                     effective,
                     se,
-                    maxSentences = maxSentences,
+                    maxSentences = sentenceBudget,
                     maxChars = maxChars,
                     isFirst = first
                 )

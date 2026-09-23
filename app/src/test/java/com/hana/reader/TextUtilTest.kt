@@ -405,6 +405,7 @@ class TextUtilTest {
         assertTrue(s0.all { it.sentenceIndex == 0 })
         assertTrue(s0.first().remainder != null)
         assertTrue(s0.last().remainder == null)
+        assertTrue(s0.none { it.text.contains("short closer") })
         // No next-sentence text appears while any remainder is still pending.
         for (i in s0.indices) {
             if (s0[i].remainder != null) {
