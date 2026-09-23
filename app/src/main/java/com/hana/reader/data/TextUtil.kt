@@ -2,12 +2,14 @@ package com.hana.reader.data
 
 object TextUtil {
     /**
-     * First-line budget for Piper English. Later chunks use a larger cap in HanaPlayer.
+     * Soft sentence budget for Piper English: prefer finishing a whole sentence
+     * when it fits under this cap. Only hard-cap mid-sentence above this.
      */
-    const val EN_CHUNK_MAX_CHARS = 120
+    const val EN_CHUNK_MAX_CHARS = 300
 
-    /** Hard cap for the first audible neural chunk (faster TTFA). */
+    /** Same soft budget for the first audible neural chunk (avoid mid-sentence jumps). */
     const val FIRST_UTTERANCE_MAX_CHARS = EN_CHUNK_MAX_CHARS
+
 
     fun normalizeForTts(text: String): String {
         var t = text
@@ -121,10 +123,12 @@ object TextUtil {
 
     /**
      * Group sentences into a speaking unit so neural TTS keeps more natural prosody.
-     * When the first sentence of a chunk exceeds [maxChars], hard-caps it and returns
-     * [SpeakChunkResult.remainder] so the caller can continue without losing text.
+     * Prefer sentence boundaries: when the current sentence fits under [maxChars]
+     * it is spoken whole. Only when it exceeds [maxChars] do we hard-cap and return
+     * [SpeakChunkResult.remainder] — the caller must play the remainder before
+     * advancing to the next sentence.
      *
-     * @param isFirst when true, use a single short utterance (caller should pass
+     * @param isFirst when true, use a single sentence (caller should pass
      *   [FIRST_UTTERANCE_MAX_CHARS] as [maxChars]).
      */
     fun speakChunk(

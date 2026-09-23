@@ -1,16 +1,15 @@
 # Hana
 
-A calm Android ebook reader that reads to you in a warm female voice. Built for books you would rather hear than stare at — English and Indonesian.
+A calm Android ebook reader that reads to you in a warm female voice. Built for books you would rather hear than stare at — English neural voices, with Indonesian books readable via System TTS.
 
 ## What it does
 
 - Minimal library + reader
 - **Listen like music**: lock the phone, Hana keeps reading from a notification
-- **Offline neural voices** after one download per language
+- **Offline neural voices** after one download (English only for now)
   - English **Smooth** (default Listen): **Piper** `en_US-lessac-medium` — slower, with pauses
-  - English **Warm**: **Piper** `en_US-amy-medium` — softer, commas kept
-  - Indonesian: **Piper** `id_ID-news_tts-medium` — slower, with pauses
-- Falls back to the device TTS voice if the neural pack is missing
+  - English **Warm**: **Piper** `en_US-amy-medium` — softer, commas kept, lower buzz
+- Falls back to the device TTS voice if the neural pack is missing (including Indonesian books)
 - Google sign-in + local progress saving
 - Import `.epub`, `.txt`, or Markdown
 - English and Indonesian library to start
@@ -37,9 +36,9 @@ Until that is added, **Continue locally** still works and progress is saved on t
 
 ## Voice
 
-Tap **Listen**. The first English book downloads **Smooth** (~67 MB). **Warm** (~64 MB) is optional in Voices if you want a softer voice. The first Indonesian book downloads Piper (~64 MB). After that, listening works in airplane mode.
+Tap **Listen**. The first English book downloads **Smooth** (~67 MB). **Warm** (~64 MB) is optional in Voices if you want a softer voice. Indonesian books use the device System TTS for now. After the English pack is installed, listening works in airplane mode.
 
-Listen follows the Piper mobile guide: Smooth is slower (length 1.15), Warm is Amy at 1.20 with natural noise, and every sentence gets a 400ms breath.
+Listen follows the Piper mobile guide: Smooth is slower (length 1.15), Warm is Amy at 1.20 with cleaner noise, and every sentence gets a 400ms breath. English chunks prefer whole sentences under ~300 characters so Warm does not jump mid-sentence.
 
 Tap the caption on the mini player to switch **Hana · neural** (Piper) and **Device** (system TTS).
 

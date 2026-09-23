@@ -144,31 +144,23 @@ fun VoicesScreen(nav: NavHostController) {
         }
 
         Text(
-            "Smooth is slower now so you can follow. Warm keeps the commas. Cerita is soft offline Indonesian.",
+            "Smooth is slower now so you can follow. Warm keeps the commas and sentence space.",
             color = Muted,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
         )
 
         Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-            listOf("en" to "English", "id" to "Indonesia").forEach { (key, label) ->
-                val on = langTab == key
-                Text(
-                    label,
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .clip(CircleShape)
-                        .background(if (on) Ink else Subtle)
-                        .clickable {
-                            langTab = key
-                            selectedId = prefs.selectedVoiceId(key)
-                        }
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    color = if (on) Paper else Muted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+            Text(
+                "English",
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(Ink)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                color = Paper,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
 
         LazyColumn(
@@ -282,7 +274,7 @@ private fun PackCard(
     val blurb = when (pack.packId) {
         TtsPacks.EN_SMOOTH.packId -> "Piper Lessac · ~67 MB · slower, with pauses"
         TtsPacks.EN_WARM.packId -> "Piper Amy · ~64 MB · softer, commas kept"
-        else -> "Piper · ~63 MB · soft storytelling (Cerita)"
+        else -> "Piper · English voice pack"
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
