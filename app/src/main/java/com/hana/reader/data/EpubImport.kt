@@ -6,7 +6,7 @@ import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /**
- * Minimal EPUB helpers: chapter text + optional cover bytes for Reader-only display.
+ * Minimal EPUB helpers: chapter text, optional cover, and OPF title for import.
  */
 object EpubImport {
 
@@ -76,6 +76,62 @@ object EpubImport {
             dest.writeBytes(bytes)
             dest.absolutePath
         }.getOrNull()
+    }
+
+
+    /**
+     * Best-effort dc:title from the OPF package document.
+     * Returns null when metadata is missing or unreadable.
+     */
+    fun readMetadataTitle(bytes: ByteArray): String? =
+        readMetadataTitle(ByteArrayInputStream(bytes))
+
+    fun readMetadataTitle(input: InputStream): String? {
+        val entries = linkedMapOf<String, ByteArray>()
+        ZipInputStream(input).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                if (!entry.isDirectory) {
+                    val data = zip.readBytes()
+                    if (data.size <= 2_000_000) {
+                        entries[entry.name.replace('\\', '/')] = data
+                    }
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+        }
+        val container = entries.entries
+            .firstOrNull { it.key.equals("META-INF/container.xml", ignoreCase = true) }
+            ?.value
+            ?.toString(Charsets.UTF_8)
+            ?: return titleFromAnyOpf(entries)
+        val rootPath = Regex(
+            """full-path\s*=\s*["']([^"']+)["']""",
+            RegexOption.IGNORE_CASE
+        ).find(container)?.groupValues?.get(1)?.replace('\\', '/')
+            ?: return titleFromAnyOpf(entries)
+        val opfBytes = findEntry(entries, rootPath) ?: return titleFromAnyOpf(entries)
+        return parseDcTitle(opfBytes.toString(Charsets.UTF_8)) ?: titleFromAnyOpf(entries)
+    }
+
+    private fun titleFromAnyOpf(entries: Map<String, ByteArray>): String? {
+        for ((name, data) in entries) {
+            if (name.lowercase().endsWith(".opf")) {
+                parseDcTitle(data.toString(Charsets.UTF_8))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /** Visible for unit tests. */
+    fun parseDcTitle(opf: String): String? {
+        val tagged = Regex(
+            """<(?:dc:)?title\b[^>]*>([^<]+)</(?:dc:)?title>""",
+            setOf(RegexOption.IGNORE_CASE)
+        ).find(opf)?.groupValues?.get(1)
+        val raw = tagged?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        return raw.takeIf { it.isNotBlank() }
     }
 
     /**

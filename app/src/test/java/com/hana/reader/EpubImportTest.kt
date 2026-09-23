@@ -60,4 +60,34 @@ class EpubImportTest {
         """.trimIndent()
         assertEquals("OEBPS/cover.jpeg", EpubImport.resolveCoverHref(opf))
     }
+
+    @Test
+    fun parseDcTitle_prefersDcTitle() {
+        val opf = """
+            <package xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <metadata>
+                <dc:title>Bumi Manusia</dc:title>
+                <dc:creator>Pramoedya</dc:creator>
+              </metadata>
+            </package>
+        """.trimIndent()
+        assertEquals("Bumi Manusia", EpubImport.parseDcTitle(opf))
+    }
+
+    @Test
+    fun parseDcTitle_plainTitleTag() {
+        val opf = """
+            <package>
+              <metadata>
+                <title id="t">  Quiet Title  </title>
+              </metadata>
+            </package>
+        """.trimIndent()
+        assertEquals("Quiet Title", EpubImport.parseDcTitle(opf))
+    }
+
+    @Test
+    fun parseDcTitle_missingReturnsNull() {
+        assertNull(EpubImport.parseDcTitle("<package><metadata/></package>"))
+    }
 }
