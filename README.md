@@ -13,6 +13,7 @@ A calm Android ebook reader that reads to you in a warm female voice. Built for 
 - **+** in the Library top bar to add a book (EPUB / TXT / Markdown); list shows number + title; covers appear inside the Reader
 - Empty library by default — tap **+** to add EPUB / TXT / Markdown
 - Per-row **⋯** menu to rename or delete an imported book (delete confirms)
+- Reader top bar has a clear divider and the same **⋯** Rename / Delete menu
 
 ## Download the APK
 

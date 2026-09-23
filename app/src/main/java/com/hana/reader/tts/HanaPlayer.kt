@@ -117,6 +117,13 @@ class HanaPlayer(context: Context) {
         persist()
     }
 
+    /** Keep MiniPlayer / notification title in sync after a Library or Reader rename. */
+    fun refreshBookMetadata(book: Book) {
+        val snap = _state.value
+        if (snap.book?.id != book.id) return
+        _state.value = snap.copy(book = book)
+    }
+
     /** Stop and drop player state when an imported book is deleted from the library. */
     fun releaseBook(bookId: String) {
         if (_state.value.book?.id != bookId) return

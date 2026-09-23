@@ -320,7 +320,7 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
             Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(Ink.copy(alpha = 0.28f))
+                .background(Ink.copy(alpha = 0.32f))
         )
         Column(
             Modifier
@@ -574,16 +574,23 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
     val context = LocalContext.current
     val player = HanaPlayer.get(context)
     val snap by player.state.collectAsState()
-    val saved = store.get(book.id)
+    var displayBook by remember(book.id) { mutableStateOf(book) }
+    val saved = store.get(displayBook.id)
     var night by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf(false) }
+    var pendingRename by remember { mutableStateOf(false) }
+    var renameDraft by remember { mutableStateOf(book.title) }
+    val canManage = store.isImported(displayBook.id)
     // No OfflineTts / prebuffer on open — show text ASAP; prepare only on Listen / Voices.
     val bg = if (night) Color(0xFF161310) else Paper
     val fg = if (night) Color(0xFFF3ECE3) else Ink
+    val divider = if (night) Color.White.copy(alpha = 0.22f) else Ink.copy(alpha = 0.32f)
     // Honest highlight: no warm-ink jump (sentence sync is not word-accurate).
     // Auto-scroll to the active sentence remains below.
     val listState = rememberLazyListState()
-    val chapterSentences = remember(book.id, book.chapters) {
-        book.chapters.map { chapter -> TextUtil.splitSentences(chapter.body) }
+    val chapterSentences = remember(displayBook.id, displayBook.chapters) {
+        displayBook.chapters.map { chapter -> TextUtil.splitSentences(chapter.body) }
     }
     // Flat LazyColumn indices: 0 = header; each chapter = title + sentences.
     val sentenceListIndex = remember(chapterSentences) {
@@ -595,7 +602,7 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
         }
         firstSentenceIndex
     }
-    val isThisBook = snap.book?.id == book.id
+    val isThisBook = snap.book?.id == displayBook.id
     LaunchedEffect(isThisBook, snap.chapterIndex, snap.sentenceIndex, snap.playing) {
         if (!isThisBook) return@LaunchedEffect
         val ci = snap.chapterIndex
@@ -605,14 +612,86 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
         val target = sentenceListIndex[ci] + si
         runCatching { listState.animateScrollToItem(target) }
     }
+    fun confirmRename(title: String) {
+        if (store.renameImported(displayBook.id, title)) {
+            val refreshed = store.book(displayBook.id) ?: displayBook.copy(title = title.trim())
+            displayBook = refreshed
+            player.refreshBookMetadata(refreshed)
+        }
+        pendingRename = false
+    }
+    fun confirmDelete() {
+        if (player.state.value.book?.id == displayBook.id) player.releaseBook(displayBook.id)
+        if (store.removeImported(displayBook.id)) {
+            pendingDelete = false
+            nav.popBackStack()
+        } else {
+            pendingDelete = false
+        }
+    }
     Column(Modifier.fillMaxSize().background(bg).statusBarsPadding()) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 4.dp)
+        ) {
             IconButton(onClick = { nav.popBackStack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = fg)
             }
-            Text(book.title, modifier = Modifier.weight(1f), maxLines = 1, color = fg, fontWeight = FontWeight.Medium)
-            TextButton(onClick = { night = !night }) { Text(if (night) "Paper" else "Night", color = Muted) }
+            Text(
+                displayBook.title,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = fg,
+                fontWeight = FontWeight.Medium
+            )
+            if (canManage) {
+                Box {
+                    IconButton(
+                        onClick = { menuOpen = true },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "Book options",
+                            tint = Muted
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            onClick = {
+                                menuOpen = false
+                                renameDraft = displayBook.title
+                                pendingRename = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = Rose) },
+                            onClick = {
+                                menuOpen = false
+                                pendingDelete = true
+                            }
+                        )
+                    }
+                }
+            }
+            TextButton(onClick = { night = !night }) {
+                Text(if (night) "Paper" else "Night", color = Muted)
+            }
         }
+        // Full-width bottom border under back / title / ⋯ / Night (matches Library strength).
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(divider)
+        )
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -620,24 +699,24 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
                 .padding(horizontal = 20.dp),
             contentPadding = PaddingValues(bottom = 160.dp)
         ) {
-            item(key = "header-${book.id}") {
+            item(key = "header-${displayBook.id}") {
                 Row(Modifier.padding(vertical = 16.dp)) {
-                    Cover(book, Modifier.size(72.dp, 96.dp))
+                    Cover(displayBook, Modifier.size(72.dp, 96.dp))
                     Spacer(Modifier.width(16.dp))
                     Column {
-                        Text(book.title, fontFamily = FontFamily.Serif, fontSize = 26.sp, color = fg)
-                        Text(book.author, color = Muted, fontSize = 14.sp)
+                        Text(displayBook.title, fontFamily = FontFamily.Serif, fontSize = 26.sp, color = fg)
+                        Text(displayBook.author, color = Muted, fontSize = 14.sp)
                         Spacer(Modifier.height(10.dp))
                         Button(
                             onClick = {
-                                if (snap.book?.id == book.id && snap.playing) player.pause()
-                                else player.play(book, saved?.chapterIndex, saved?.sentenceIndex)
+                                if (snap.book?.id == displayBook.id && snap.playing) player.pause()
+                                else player.play(displayBook, saved?.chapterIndex, saved?.sentenceIndex)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Rose),
                             shape = CircleShape,
                             enabled = !snap.busy
                         ) {
-                            val listening = snap.book?.id == book.id && snap.playing
+                            val listening = snap.book?.id == displayBook.id && snap.playing
                             val waitLabel = snap.status?.takeIf { listening && (
                                 it.contains("Starting", true) ||
                                     it.contains("Getting first", true) ||
@@ -662,8 +741,8 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
                     }
                 }
             }
-            book.chapters.forEachIndexed { ci, chapter ->
-                item(key = "${book.id}-ch-$ci-title-${chapter.id}") {
+            displayBook.chapters.forEachIndexed { ci, chapter ->
+                item(key = "${displayBook.id}-ch-$ci-title-${chapter.id}") {
                     Text(
                         chapter.title,
                         fontFamily = FontFamily.Serif,
@@ -673,7 +752,7 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
                     )
                 }
                 chapterSentences[ci].forEachIndexed { si, sentence ->
-                    item(key = "${book.id}-ch-$ci-s-$si") {
+                    item(key = "${displayBook.id}-ch-$ci-s-$si") {
                         Text(
                             text = sentence,
                             color = fg,
@@ -685,13 +764,68 @@ private fun ReaderScreen(book: Book, store: ProgressStore, nav: NavHostControlle
                                 .fillMaxWidth()
                                 .padding(bottom = 6.dp)
                                 .clickable(enabled = !snap.busy) {
-                                    player.play(book, ci, si)
+                                    player.play(displayBook, ci, si)
                                 }
                         )
                     }
                 }
             }
         }
+    }
+    if (pendingDelete) {
+        AlertDialog(
+            onDismissRequest = { pendingDelete = false },
+            title = { Text("Hapus buku?") },
+            text = {
+                Text("“${displayBook.title}” akan dihapus dari perpustakaan, beserta progresnya.")
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete() }) {
+                    Text("Hapus", color = Rose)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = false }) {
+                    Text("Batal", color = Muted)
+                }
+            }
+        )
+    }
+    if (pendingRename) {
+        AlertDialog(
+            onDismissRequest = { pendingRename = false },
+            title = { Text("Ganti nama") },
+            text = {
+                OutlinedTextField(
+                    value = renameDraft,
+                    onValueChange = { renameDraft = it },
+                    singleLine = true,
+                    label = { Text("Judul") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Ink.copy(alpha = 0.45f),
+                        unfocusedBorderColor = Ink.copy(alpha = 0.22f),
+                        focusedLabelColor = Muted,
+                        unfocusedLabelColor = Muted,
+                        cursorColor = Ink,
+                        focusedTextColor = Ink,
+                        unfocusedTextColor = Ink
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirmRename(renameDraft) },
+                    enabled = renameDraft.trim().isNotEmpty()
+                ) {
+                    Text("Simpan", color = Rose)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRename = false }) {
+                    Text("Batal", color = Muted)
+                }
+            }
+        )
     }
 }
 
@@ -960,11 +1094,13 @@ private fun importUri(activity: Activity, uri: Uri, store: ProgressStore): Book 
         (activity.contentResolver.getType(uri)?.contains("epub") == true)
     val bookId = "imp-${System.currentTimeMillis()}"
     var coverPath: String? = null
+    var metaTitle: String? = null
     val textBody: String
     if (isEpub) {
         val bytes = activity.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: error("Could not open that EPUB.")
         textBody = EpubImport.readTextChapters(bytes)
+        metaTitle = EpubImport.readMetadataTitle(bytes)
         val coverBytes = EpubImport.extractCoverBytes(bytes)
         if (coverBytes != null) {
             coverPath = EpubImport.writeCoverFile(store.coverFileFor(bookId), coverBytes)
@@ -973,7 +1109,8 @@ private fun importUri(activity: Activity, uri: Uri, store: ProgressStore): Book 
         textBody = readText(activity, uri)
     }
     val language = if (Regex("\\b(yang|dan|dengan|tidak|untuk)\\b", RegexOption.IGNORE_CASE).findAll(textBody.take(1500)).count() >= 4) "id" else "en"
-    val title = name.replace(Regex("\\.(epub|txt|md|markdown)$", RegexOption.IGNORE_CASE), "")
+    val fileTitle = name.replace(Regex("\\.(epub|txt|md|markdown)$", RegexOption.IGNORE_CASE), "")
+    val title = metaTitle?.takeIf { it.isNotBlank() } ?: fileTitle
     val book = Book(
         id = bookId,
         title = title,
