@@ -9,8 +9,6 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -42,18 +40,19 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
@@ -232,7 +231,6 @@ private fun LoginScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: String?) {
     val context = LocalContext.current
@@ -253,6 +251,8 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
     // No Library auto warmPrepare / Smooth download — wait for Listen or Voices.
     var error by remember { mutableStateOf<String?>(null) }
     var pendingDelete by remember { mutableStateOf<Book?>(null) }
+    var pendingRename by remember { mutableStateOf<Book?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val activity = GoogleAuth.findActivity(context) ?: return@rememberLauncherForActivityResult
@@ -280,16 +280,22 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
         }
         pendingDelete = null
     }
+    fun confirmRename(book: Book, title: String) {
+        if (store.renameImported(book.id, title)) {
+            books = store.allBooks()
+        }
+        pendingRename = null
+    }
 
     Column(
         Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(horizontal = 20.dp)
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 20.dp)
                 .padding(bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -309,99 +315,110 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
                 Icon(Icons.Default.RecordVoiceOver, contentDescription = "Voices", tint = Ink)
             }
         }
-        // Soft cream/ink hairline under the top bar before content
+        // Visible full-width divider under the top bar (cream-safe contrast; 1dp solid ink).
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(Ink.copy(alpha = 0.10f))
+                .background(Ink.copy(alpha = 0.28f))
         )
-        if (error != null) {
-            Text(error!!, color = Rose, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-        }
-        if (continueBook != null) {
-            Surface(
-                modifier = Modifier
-                    .padding(top = 12.dp)
-                    .fillMaxWidth()
-                    .clickable { nav.navigate("read/${continueBook.id}") },
-                color = PaperElevated,
-                shape = RoundedCornerShape(16.dp),
-                shadowElevation = 1.dp
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+        ) {
+            if (error != null) {
+                Text(error!!, color = Rose, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            if (continueBook != null) {
+                Surface(
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth()
+                        .clickable { nav.navigate("read/${continueBook.id}") },
+                    color = PaperElevated,
+                    shape = RoundedCornerShape(16.dp),
+                    shadowElevation = 1.dp
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("CONTINUE", color = Muted, fontSize = 10.sp, letterSpacing = 1.4.sp)
-                        Text(
-                            continueBook.title,
-                            fontFamily = FontFamily.Serif,
-                            fontSize = 16.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            player.play(continueBook)
-                            nav.navigate("read/${continueBook.id}")
-                        },
-                        modifier = Modifier.size(40.dp)
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Headphones, contentDescription = "Listen", tint = Rose)
+                        Column(Modifier.weight(1f)) {
+                            Text("CONTINUE", color = Muted, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                            Text(
+                                continueBook.title,
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                player.play(continueBook)
+                                nav.navigate("read/${continueBook.id}")
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.Default.Headphones, contentDescription = "Listen", tint = Rose)
+                        }
                     }
                 }
             }
-        }
-        if (books.isEmpty()) {
-            Column(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    "Perpustakaan masih kosong.",
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 20.sp,
-                    color = Ink,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                Text(
-                    "Ketuk + untuk menambahkan buku — EPUB, TXT, atau Markdown.\nYour library is quiet. Tap + to add a book.",
-                    color = Muted,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-            }
-        } else {
-            Text(
-                "BOOKS",
-                color = Muted,
-                fontSize = 11.sp,
-                letterSpacing = 1.6.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-            )
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = 96.dp)
-            ) {
-                itemsIndexed(books, key = { _, book -> book.id }) { index, book ->
-                    LibraryBookListItem(
-                        number = index + 1,
-                        book = book,
-                        canDelete = store.isImported(book.id),
-                        onOpen = { nav.navigate("read/${book.id}") },
-                        onRequestDelete = { pendingDelete = book }
+            if (books.isEmpty()) {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Perpustakaan masih kosong.",
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 20.sp,
+                        color = Ink,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
+                    Text(
+                        "Ketuk + untuk menambahkan buku — EPUB, TXT, atau Markdown.\nYour library is quiet. Tap + to add a book.",
+                        color = Muted,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+            } else {
+                Text(
+                    "BOOKS",
+                    color = Muted,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.6.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                )
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(bottom = 96.dp)
+                ) {
+                    itemsIndexed(books, key = { _, book -> book.id }) { index, book ->
+                        LibraryBookListItem(
+                            number = index + 1,
+                            book = book,
+                            canManage = store.isImported(book.id),
+                            onOpen = { nav.navigate("read/${book.id}") },
+                            onRequestRename = {
+                                pendingRename = book
+                                renameDraft = book.title
+                            },
+                            onRequestDelete = { pendingDelete = book }
+                        )
+                    }
                 }
             }
         }
@@ -425,86 +442,79 @@ private fun LibraryScreen(store: ProgressStore, nav: NavHostController, email: S
             }
         )
     }
+    pendingRename?.let { book ->
+        AlertDialog(
+            onDismissRequest = { pendingRename = null },
+            title = { Text("Ganti nama") },
+            text = {
+                OutlinedTextField(
+                    value = renameDraft,
+                    onValueChange = { renameDraft = it },
+                    singleLine = true,
+                    label = { Text("Judul") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Ink.copy(alpha = 0.45f),
+                        unfocusedBorderColor = Ink.copy(alpha = 0.22f),
+                        focusedLabelColor = Muted,
+                        unfocusedLabelColor = Muted,
+                        cursorColor = Ink,
+                        focusedTextColor = Ink,
+                        unfocusedTextColor = Ink
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirmRename(book, renameDraft) },
+                    enabled = renameDraft.trim().isNotEmpty()
+                ) {
+                    Text("Simpan", color = Rose)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRename = null }) {
+                    Text("Batal", color = Muted)
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun LibraryBookListItem(
     number: Int,
     book: Book,
-    canDelete: Boolean,
+    canManage: Boolean,
     onOpen: () -> Unit,
+    onRequestRename: () -> Unit,
     onRequestDelete: () -> Unit
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (!canDelete) return@rememberSwipeToDismissBoxState false
-            if (value == SwipeToDismissBoxValue.EndToStart ||
-                value == SwipeToDismissBoxValue.StartToEnd
-            ) {
-                onRequestDelete()
-                false
-            } else true
-        }
+    LibraryBookRow(
+        number = number,
+        book = book,
+        canManage = canManage,
+        onOpen = onOpen,
+        onRequestRename = onRequestRename,
+        onRequestDelete = onRequestDelete
     )
-    if (!canDelete) {
-        LibraryBookRow(
-            number = number,
-            book = book,
-            onOpen = onOpen,
-            onRequestDelete = null
-        )
-    } else {
-        SwipeToDismissBox(
-            state = dismissState,
-            backgroundContent = {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(vertical = 2.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Rose.copy(alpha = 0.12f))
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, tint = Rose)
-                }
-            },
-            enableDismissFromStartToEnd = true,
-            enableDismissFromEndToStart = true
-        ) {
-            LibraryBookRow(
-                number = number,
-                book = book,
-                onOpen = onOpen,
-                onRequestDelete = onRequestDelete
-            )
-        }
-    }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryBookRow(
     number: Int,
     book: Book,
+    canManage: Boolean,
     onOpen: () -> Unit,
-    onRequestDelete: (() -> Unit)?
+    onRequestRename: () -> Unit,
+    onRequestDelete: () -> Unit
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .then(
-                if (onRequestDelete != null) {
-                    Modifier.combinedClickable(
-                        onClick = onOpen,
-                        onLongClick = onRequestDelete
-                    )
-                } else {
-                    Modifier.clickable(onClick = onOpen)
-                }
-            )
-            .padding(vertical = 12.dp, horizontal = 4.dp),
+            .clickable(onClick = onOpen)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -523,6 +533,39 @@ private fun LibraryBookRow(
             fontSize = 17.sp,
             color = Ink
         )
+        if (canManage) {
+            Box {
+                IconButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "Book options",
+                        tint = Muted
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        onClick = {
+                            menuOpen = false
+                            onRequestRename()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = Rose) },
+                        onClick = {
+                            menuOpen = false
+                            onRequestDelete()
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 

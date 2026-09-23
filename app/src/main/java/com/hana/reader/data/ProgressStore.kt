@@ -98,8 +98,22 @@ class ProgressStore(context: Context) {
             .apply()
     }
 
-    /** True when the book was user-imported (deletable). */
+    /** True when the book was user-imported (deletable / renamable). */
     fun isImported(bookId: String): Boolean = importedIds().contains(bookId)
+
+    /**
+     * Updates the display title of an imported book in prefs.
+     * Keeps the same book id, chapters, cover path, and reading progress.
+     */
+    fun renameImported(bookId: String, newTitle: String): Boolean {
+        if (!isImported(bookId)) return false
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty()) return false
+        val existing = importedBook(bookId) ?: return false
+        if (existing.title == trimmed) return true
+        addImported(existing.copy(title = trimmed))
+        return true
+    }
 
     /**
      * Removes an imported book, its progress, and any cached cover file.
