@@ -113,5 +113,74 @@ class VoicePrefs(context: Context) {
             .apply()
     }
 
+
+    // --- Per-voice listen settings (rate + Piper VITS acoustics) ---
+
+    fun rateForVoice(voiceId: String): Float {
+        val id = VoiceCatalog.canonicalId(voiceId)
+        return prefs.getFloat(rateKey(id), TtsPacks.DEFAULT_RATE).coerceIn(RATE_MIN, RATE_MAX)
+    }
+
+    fun setRateForVoice(voiceId: String, rate: Float) {
+        val id = VoiceCatalog.canonicalId(voiceId)
+        prefs.edit().putFloat(rateKey(id), rate.coerceIn(RATE_MIN, RATE_MAX)).apply()
+    }
+
+    fun acousticForVoice(voiceId: String): TtsPacks.Acoustic {
+        val id = VoiceCatalog.canonicalId(voiceId)
+        val factory = factoryAcoustic(id)
+        val length = prefs.getFloat(lengthKey(id), factory.lengthScale)
+        val noise = prefs.getFloat(noiseKey(id), factory.noiseScale)
+        val noiseW = prefs.getFloat(noiseWKey(id), factory.noiseScaleW)
+        return TtsPacks.Acoustic(
+            lengthScale = length.coerceIn(LENGTH_MIN, LENGTH_MAX),
+            noiseScale = noise.coerceIn(NOISE_MIN, NOISE_MAX),
+            noiseScaleW = noiseW.coerceIn(NOISE_W_MIN, NOISE_W_MAX),
+        )
+    }
+
+    fun setAcousticForVoice(voiceId: String, acoustic: TtsPacks.Acoustic) {
+        val id = VoiceCatalog.canonicalId(voiceId)
+        prefs.edit()
+            .putFloat(lengthKey(id), acoustic.lengthScale.coerceIn(LENGTH_MIN, LENGTH_MAX))
+            .putFloat(noiseKey(id), acoustic.noiseScale.coerceIn(NOISE_MIN, NOISE_MAX))
+            .putFloat(noiseWKey(id), acoustic.noiseScaleW.coerceIn(NOISE_W_MIN, NOISE_W_MAX))
+            .apply()
+    }
+
+    fun resetVoiceSettings(voiceId: String) {
+        val id = VoiceCatalog.canonicalId(voiceId)
+        val factory = factoryAcoustic(id)
+        prefs.edit()
+            .putFloat(rateKey(id), TtsPacks.DEFAULT_RATE)
+            .putFloat(lengthKey(id), factory.lengthScale)
+            .putFloat(noiseKey(id), factory.noiseScale)
+            .putFloat(noiseWKey(id), factory.noiseScaleW)
+            .apply()
+    }
+
+    fun factoryAcoustic(voiceId: String): TtsPacks.Acoustic {
+        val pack = TtsPacks.packForVoice(VoiceCatalog.canonicalId(voiceId))
+        return if (pack != null) TtsPacks.acousticFor(pack.packId) else TtsPacks.SMOOTH_ACOUSTIC
+    }
+
+
+    private fun rateKey(voiceId: String) = "voice_rate_$voiceId"
+    private fun lengthKey(voiceId: String) = "voice_length_$voiceId"
+    private fun noiseKey(voiceId: String) = "voice_noise_$voiceId"
+    private fun noiseWKey(voiceId: String) = "voice_noise_w_$voiceId"
+
+    companion object {
+        const val RATE_MIN = 0.70f
+        const val RATE_MAX = 1.15f
+        const val LENGTH_MIN = 0.90f
+        const val LENGTH_MAX = 1.40f
+        const val NOISE_MIN = 0.30f
+        const val NOISE_MAX = 0.80f
+        const val NOISE_W_MIN = 0.35f
+        const val NOISE_W_MAX = 0.85f
+    }
+
     private fun key(language: String) = "voice_$language"
 }
+

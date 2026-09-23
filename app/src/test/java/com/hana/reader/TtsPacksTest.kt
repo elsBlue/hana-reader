@@ -126,8 +126,8 @@ class TtsPacksTest {
         assertEquals(0.70f, smooth.noiseScaleW)
         val warm = TtsPacks.acousticFor(TtsPacks.EN_WARM.packId)
         assertEquals(1.15f, warm.lengthScale)
-        assertEquals(0.50f, warm.noiseScale)
-        assertEquals(0.55f, warm.noiseScaleW)
+        assertEquals(0.42f, warm.noiseScale)
+        assertEquals(0.48f, warm.noiseScaleW)
         // Unknown pack ids fall back to Smooth acoustics (no ID pack).
         val fallback = TtsPacks.acousticFor("piper-id-news-medium")
         assertEquals(TtsPacks.SMOOTH_ACOUSTIC, fallback)

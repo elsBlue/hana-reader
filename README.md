@@ -42,6 +42,8 @@ Listen follows the Piper mobile guide: Smooth is the default (length 1.15), Warm
 
 Tap the caption on the mini player to switch **Hana · neural** (Piper) and **Device** (system TTS).
 
+**Voice settings** (Voices screen → tune icon, or MiniPlayer → tune): Speed, Pace, Texture, and Breath. Lower Texture to reduce Warm buzz. Pitch is not available for offline Hana voices. Settings persist per voice (Smooth / Warm).
+
 The web preview uses the browser voice. This Android app uses sherpa-onnx so playback still works with the screen locked.
 
 See `NOTICE` for licenses and download URLs.

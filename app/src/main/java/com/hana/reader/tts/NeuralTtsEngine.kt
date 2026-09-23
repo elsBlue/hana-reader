@@ -18,6 +18,7 @@ class NeuralTtsEngine {
     @Volatile private var session: OfflineTts? = null
     @Volatile private var loadedLang: String? = null
     @Volatile private var loadedPackId: String? = null
+    @Volatile private var loadedAcoustic: TtsPacks.Acoustic? = null
     @Volatile private var track: AudioTrack? = null
     @Volatile private var trackRate: Int = 0
     private val lock = Any()
@@ -26,19 +27,29 @@ class NeuralTtsEngine {
 
     fun isLoadedPack(packId: String): Boolean = session != null && loadedPackId == packId
 
-    fun prepare(language: String, files: ModelFiles, packId: String = files.kind.name) {
+    fun isPrepared(packId: String, acoustic: TtsPacks.Acoustic): Boolean =
+        session != null && loadedPackId == packId && loadedAcoustic == acoustic
+
+    fun prepare(
+        language: String,
+        files: ModelFiles,
+        packId: String = files.kind.name,
+        acoustic: TtsPacks.Acoustic = TtsPacks.acousticFor(packId),
+    ) {
         synchronized(lock) {
-            // No-op only when the same pack is already live — never reuse a freed pointer.
-            if (session != null && loadedPackId == packId && loadedLang == language) return
+            // No-op only when the same pack + acoustics are already live — never reuse a freed pointer.
+            if (session != null && loadedPackId == packId && loadedLang == language && loadedAcoustic == acoustic) return
             abortStreamLocked()
             session?.release()
             // Null before construct so a failed OfflineTts() cannot leave a dangling pointer.
             session = null
             loadedLang = null
             loadedPackId = null
-            session = OfflineTts(config = configFor(files, packId))
+            loadedAcoustic = null
+            session = OfflineTts(config = configFor(files, packId, acoustic))
             loadedLang = language
             loadedPackId = packId
+            loadedAcoustic = acoustic
             // Soft-fail warm-up under the same lock (shrinks release/generate race window).
             runCatching {
                 val warmText = "Ready."
@@ -156,6 +167,7 @@ class NeuralTtsEngine {
             session = null
             loadedLang = null
             loadedPackId = null
+            loadedAcoustic = null
         }
     }
 
@@ -274,8 +286,11 @@ class NeuralTtsEngine {
         return out
     }
 
-    private fun configFor(files: ModelFiles, packId: String): OfflineTtsConfig {
-        val acoustic = TtsPacks.acousticFor(packId)
+    private fun configFor(
+        files: ModelFiles,
+        packId: String,
+        acoustic: TtsPacks.Acoustic,
+    ): OfflineTtsConfig {
         return OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(

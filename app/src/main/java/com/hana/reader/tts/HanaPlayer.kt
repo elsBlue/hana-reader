@@ -51,6 +51,15 @@ class HanaPlayer(context: Context) {
     private val queueMutex = Mutex()
     private val _state = MutableStateFlow(PlayerSnapshot())
     val state: StateFlow<PlayerSnapshot> = _state.asStateFlow()
+
+    init {
+        // Restore last Speed for the selected English voice (comfort default Smooth).
+        val bootVoice = voicePrefs.selectedVoiceId("en")
+        val bootRate = voicePrefs.rateForVoice(bootVoice)
+        _state.value = _state.value.copy(rate = bootRate)
+        system.setRate(bootRate)
+    }
+
     private var speakJob: Job? = null
     private var fillJob: Job? = null
     /** Lookahead of already-synthesized PCM chunks (depth [QUEUE_DEPTH]). */
@@ -178,13 +187,102 @@ class HanaPlayer(context: Context) {
         }
     }
 
-    fun setRate(rate: Float) {
+    fun setRate(rate: Float, persist: Boolean = true) {
         val r = rate.coerceIn(0.7f, 1.4f)
         _state.value = _state.value.copy(rate = r)
         system.setRate(r)
+        if (persist) {
+            val lang = _state.value.book?.language ?: "en"
+            val voiceId = voicePrefs.selectedVoiceId(lang)
+            voicePrefs.setRateForVoice(voiceId, r.coerceIn(VoicePrefs.RATE_MIN, VoicePrefs.RATE_MAX))
+        }
+        // Live rate: restart the current utterance so neural/system pick up the new speed.
+        if (_state.value.playing) {
+            restartSpeak(prepare = false)
+        }
     }
 
     fun voicePreferences(): VoicePrefs = voicePrefs
+
+    /**
+     * Persist Pace/Texture for [voiceId] and reload OfflineTts under the same
+     * single-lock path as switchVoice (busy overlay OK). Rate is live via [setRate].
+     */
+    suspend fun applyAcousticSettings(
+        language: String,
+        voiceId: String,
+        acoustic: TtsPacks.Acoustic,
+    ) {
+        voicePrefs.setAcousticForVoice(voiceId, acoustic)
+        reloadVoiceEngine(language, voiceId, "Applying voice texture…")
+    }
+
+    /** Restore factory rate + Smooth/Warm acoustics for [voiceId], then reload. */
+    suspend fun resetVoiceSettings(language: String, voiceId: String) {
+        voicePrefs.resetVoiceSettings(voiceId)
+        val rate = voicePrefs.rateForVoice(voiceId)
+        _state.value = _state.value.copy(rate = rate)
+        system.setRate(rate)
+        reloadVoiceEngine(language, voiceId, "Restoring voice defaults…")
+    }
+
+    private suspend fun reloadVoiceEngine(language: String, voiceId: String, busyLabel: String) {
+        val voice = VoiceCatalog.find(voiceId)
+        val label = voice?.label ?: "Soft"
+        prepareMutex.withLock {
+            try {
+                _state.value = _state.value.copy(
+                    busy = true,
+                    busyMessage = busyLabel,
+                    status = busyLabel,
+                )
+                val wasPlaying = _state.value.playing
+                speakJob?.cancel()
+                speakJob = null
+                fillJob?.cancel()
+                fillJob = null
+                storyStarted = false
+                sentenceRemainder = null
+                clearReadyQueue()
+                neural.stop()
+                system.stop()
+                if (wasPlaying) {
+                    _state.value = _state.value.copy(playing = false)
+                    persist()
+                }
+                synthEpoch.incrementAndGet()
+                neural.release()
+
+                val pack = TtsPacks.packForVoice(voiceId)
+                    ?: TtsPacks.forLanguage(language)
+                    ?: error("Unknown voice $voiceId")
+                val files = models.files(pack.storageKey)
+                    ?: models.ensure(pack.storageKey) {}
+                val modelFiles = files ?: error("Voice pack missing")
+                val acoustic = acousticForVoiceId(voiceId)
+                withContext(Dispatchers.Default) {
+                    neural.prepare(language, modelFiles, pack.packId, acoustic = acoustic)
+                }
+                markNeuralReady()
+                if (wasPlaying && _state.value.book != null) {
+                    restartSpeak(prepare = false)
+                }
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                _state.value = _state.value.copy(
+                    busy = false,
+                    busyMessage = null,
+                    status = t.message?.take(48) ?: "Voice settings failed",
+                )
+                throw t
+            }
+        }
+    }
+
+
+    private fun acousticForVoiceId(voiceId: String): TtsPacks.Acoustic =
+        voicePrefs.acousticForVoice(voiceId)
+
     fun modelManager(): TtsModelManager = models
 
     /**
@@ -198,12 +296,15 @@ class HanaPlayer(context: Context) {
         prepareMutex.withLock {
             try {
                 voicePrefs.setSelectedVoiceId(language, voiceId)
+                val savedRate = voicePrefs.rateForVoice(voiceId)
                 _state.value = _state.value.copy(
                     profile = VoiceProfile.Hana,
+                    rate = savedRate,
                     status = "Preparing voice…",
                     busy = true,
                     busyMessage = TtsPacks.busyMessage(label, language, downloading = false),
                 )
+                system.setRate(savedRate)
 
                 speakJob?.cancel()
                 speakJob = null
@@ -249,7 +350,7 @@ class HanaPlayer(context: Context) {
                 }
                 val modelFiles = files ?: error("Voice pack missing after ensure")
                 withContext(Dispatchers.Default) {
-                    neural.prepare(language, modelFiles, pack.packId)
+                    neural.prepare(language, modelFiles, pack.packId, acoustic = acousticForVoiceId(voiceId))
                 }
                 markNeuralReady()
             } catch (t: Throwable) {
@@ -278,12 +379,13 @@ class HanaPlayer(context: Context) {
             neural.stop()
             system.stop()
 
-            if (!neural.isLoadedPack(pack.packId)) {
+            val previewAcoustic = acousticForVoiceId(voice.id)
+            if (!neural.isPrepared(pack.packId, previewAcoustic)) {
                 neural.release()
                 val files = models.files(pack.storageKey)
                     ?: models.ensure(pack.storageKey) {}
                 withContext(Dispatchers.Default) {
-                    neural.prepare(voice.language, files, pack.packId)
+                    neural.prepare(voice.language, files, pack.packId, acoustic = previewAcoustic)
                 }
             }
             val sample = "Hello. This is Hana, reading softly so long books feel easy."
@@ -410,7 +512,8 @@ class HanaPlayer(context: Context) {
         if (TtsPacks.forLanguage(language) == null) return
         val pack = activePack(language)
         prepareMutex.withLock {
-            if (neural.isLoadedPack(pack.packId)) {
+            val acoustic = acousticForVoiceId(voicePrefs.selectedVoiceId(language))
+            if (neural.isPrepared(pack.packId, acoustic)) {
                 markNeuralReady()
                 return
             }
@@ -456,10 +559,10 @@ class HanaPlayer(context: Context) {
                     )
                 }
                 val modelFiles = files ?: error("Voice pack missing after ensure")
-                if (!neural.isLoadedPack(pack.packId)) {
+                if (!neural.isPrepared(pack.packId, acoustic)) {
                     clearReadyQueue()
                     withContext(Dispatchers.Default) {
-                        neural.prepare(language, modelFiles, pack.packId)
+                        neural.prepare(language, modelFiles, pack.packId, acoustic = acoustic)
                     }
                 }
                 markNeuralReady()
