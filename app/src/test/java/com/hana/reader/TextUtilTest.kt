@@ -131,7 +131,10 @@ class TextUtilTest {
 
     @Test
     fun hardCapPrefersClausePunctuation() {
-        val text = "The narrator explains the setting with unusual care and patience, then this long tail continues well past the first line budget into another clause of the story."
+        val head = "The narrator explains the setting with unusual care and patience while walking " +
+            "along the quiet river bank at dawn watching mist rise slowly over the stones"
+        val text = "$head, then this long tail continues well past the first line budget into another " +
+            "clause of the story with still more words about bells birds fields and distant weather patterns accumulating."
         assertTrue(text.length > TextUtil.FIRST_UTTERANCE_MAX_CHARS)
         val commaAt = text.indexOf(',')
         assertTrue("comma should be after minKeep", commaAt >= TextUtil.FIRST_UTTERANCE_MAX_CHARS / 3)
@@ -195,9 +198,10 @@ class TextUtilTest {
 
     @Test
     fun enChunkBudgetsMatchPiperListen() {
-        assertEquals(120, TextUtil.EN_CHUNK_MAX_CHARS)
-        assertEquals(120, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
-        assertEquals(280, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS)
+        assertEquals(300, TextUtil.EN_CHUNK_MAX_CHARS)
+        assertEquals(300, TextUtil.FIRST_UTTERANCE_MAX_CHARS)
+        assertEquals(300, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_CHARS)
+        assertEquals(300, com.hana.reader.tts.HanaPlayer.EN_FIRST_MAX_CHARS)
         assertEquals(2, com.hana.reader.tts.HanaPlayer.EN_LATER_MAX_SENTENCES)
         assertEquals(4, com.hana.reader.tts.HanaPlayer.QUEUE_DEPTH)
         assertEquals(2, com.hana.reader.tts.HanaPlayer.PLAY_RESUME_DEPTH)
@@ -205,10 +209,13 @@ class TextUtilTest {
 
     @Test
     fun firstUtterancePrefetchKeyMatchesSpeakChunkPlan() {
-        val sentences = listOf(
-            "In the quiet valley the mist rose slowly over stones and distant bells while every detail of the river and the oak tree was described without hurry,",
-            "Then a short closer."
+        val longOpener = (
+            "In the quiet valley the mist rose slowly over stones and distant bells while every detail " +
+            "of the river and the oak tree was described without hurry, and the narrator kept adding " +
+            "clause after clause about weather, birds, and the soft ringing across the fields until " +
+            "the first line budget was surely exceeded for any reasonable Piper soft-cap,"
         )
+        val sentences = listOf(longOpener, "Then a short closer.")
         // Plan at chapter 0 / sentence 0 — same ingredients speakNeural looks up.
         val planned = com.hana.reader.tts.HanaPlayer.planFirstUtterance(0, 0, sentences)
         assertNotNull(planned)
@@ -284,7 +291,7 @@ class TextUtilTest {
 
     @Test
     fun firstAndLaterEnChunksShareBudget() {
-        val long = "Words without commas just keep going past the continuous english budget into another phrase of the story here."
+        val long = ("Words without commas just keep going past the continuous english budget into another phrase of the story here. " * 4).trim()
         val first = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = TextUtil.EN_CHUNK_MAX_CHARS, isFirst = true)
         val later = TextUtil.speakChunk(listOf(long), 0, maxSentences = 1, maxChars = TextUtil.EN_CHUNK_MAX_CHARS, isFirst = false)
         assertTrue(first.text.length <= TextUtil.EN_CHUNK_MAX_CHARS + 5)
@@ -302,9 +309,9 @@ class TextUtilTest {
             "en", false, com.hana.reader.tts.NeuralKind.Piper
         )
         assertEquals(1, first.first)
-        assertEquals(120, first.second)
+        assertEquals(300, first.second)
         assertEquals(2, later.first)
-        assertEquals(280, later.second)
+        assertEquals(300, later.second)
     }
 
     @Test
@@ -344,4 +351,93 @@ class TextUtilTest {
             )
         )
     }
+
+    @Test
+    fun mediumSentenceIsNotHardCappedMidSentence() {
+        // ~220 chars — under soft max; must speak whole sentence (no remainder / no loncat).
+        val medium = (
+            "In the quiet valley the mist rose slowly over stones and distant bells " +
+            "while every detail of the river and the oak tree was described without hurry " +
+            "so the listener could follow."
+        )
+        assertTrue(medium.length < TextUtil.EN_CHUNK_MAX_CHARS)
+        assertTrue(medium.length > 120) // would have been split under the old 120 budget
+        val chunk = TextUtil.speakChunk(
+            listOf(medium, "Next sentence begins here."),
+            0,
+            maxSentences = 1,
+            maxChars = TextUtil.EN_CHUNK_MAX_CHARS,
+            isFirst = true
+        )
+        assertEquals(1, chunk.consumed)
+        assertNull(chunk.remainder)
+        assertEquals(TextUtil.normalizeForTts(medium), chunk.text)
+    }
+
+    @Test
+    fun longSentenceRemainderPlaysBeforeNextSentence() {
+        val clause = "the narrator keeps adding clauses about weather stones birds and distant bells"
+        val long = (
+            "In the beginning of this rather lengthy chapter $clause, " +
+            "while the hero waits beside the old oak near the quiet river bank at dawn, " +
+            "and every detail of the valley below is described at a pace that refuses to hurry " +
+            "toward any period mark for a very long time indeed until the reader nearly forgets " +
+            "there will be an ending, so the sentence keeps accumulating more and more."
+        )
+        assertTrue("fixture must exceed soft max", long.length > TextUtil.EN_CHUNK_MAX_CHARS)
+        val next = "Then a short closer arrives."
+        val planned = com.hana.reader.tts.HanaPlayer.planLookahead(
+            chapterSentences = listOf(listOf(long, next)),
+            chapterIndex = 0,
+            sentenceIndex = 0,
+            remainder = null,
+            language = "en",
+            isFirst = true,
+            count = 8
+        )
+        assertTrue(planned.size >= 2)
+        // All sentence-0 pieces come before any sentence-1 piece.
+        val firstNext = planned.indexOfFirst { it.sentenceIndex == 1 }
+        assertTrue("expected to eventually plan the next sentence", firstNext > 0)
+        val s0 = planned.take(firstNext)
+        assertTrue(s0.all { it.sentenceIndex == 0 })
+        assertTrue(s0.first().remainder != null)
+        assertTrue(s0.last().remainder == null)
+        // No next-sentence text appears while any remainder is still pending.
+        for (i in s0.indices) {
+            if (s0[i].remainder != null) {
+                assertFalse(s0[i].text.contains("short closer"))
+                assertTrue(planned.take(i + 1).none { it.sentenceIndex == 1 })
+            }
+        }
+        val rejoined = s0.joinToString(" ") { it.text }
+        val compact = { s: String -> TextUtil.normalizeForTts(s).replace(Regex("\\s+"), "") }
+        assertEquals(compact(long), compact(rejoined))
+        assertTrue(planned[firstNext].text.contains("short closer"))
+    }
+
+    @Test
+    fun lookaheadDoesNotEnqueueNextWhileRemainderUnplayed() {
+        val long = ("Word ".repeat(80)).trim() + "."
+        assertTrue(long.length > TextUtil.EN_CHUNK_MAX_CHARS)
+        val planned = com.hana.reader.tts.HanaPlayer.planLookahead(
+            chapterSentences = listOf(listOf(long, "SECOND_SENTENCE_MARKER.")),
+            chapterIndex = 0,
+            sentenceIndex = 0,
+            remainder = null,
+            language = "en",
+            isFirst = true,
+            count = 3
+        )
+        assertTrue(planned.isNotEmpty())
+        val first = planned.first()
+        assertNotNull(first.remainder)
+        assertEquals(0, first.sentenceIndex)
+        // Second planned item must still be sentence 0 remainder, not the next sentence.
+        if (planned.size >= 2) {
+            assertEquals(0, planned[1].sentenceIndex)
+            assertFalse(planned[1].text.contains("SECOND_SENTENCE_MARKER"))
+        }
+    }
+
 }

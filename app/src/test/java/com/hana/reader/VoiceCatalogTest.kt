@@ -21,15 +21,17 @@ class VoiceCatalogTest {
         assertNull(VoiceCatalog.find("af_bella"))
         assertFalse(en.any { it.id.startsWith("af_") })
         assertEquals(2, en.size)
+        assertEquals(VoiceCatalog.ENGLISH, VoiceCatalog.all())
+        assertTrue(VoiceCatalog.forLanguage("id").isEmpty())
     }
 
     @Test
     fun comfortDefaultMigratesFactoryBellaToSmooth() {
         assertEquals("en_lessac", VoiceDefaults.defaultId("en"))
+        assertEquals("en_lessac", VoiceDefaults.defaultId("id"))
         assertEquals("en_lessac", VoiceDefaults.englishIdAfterComfortMigration(null))
         assertEquals("en_lessac", VoiceDefaults.englishIdAfterComfortMigration("af_bella"))
         assertEquals("en_lessac", VoiceDefaults.englishIdAfterComfortMigration("en_lessac"))
-        assertEquals("id_cerita", VoiceDefaults.defaultId("id"))
     }
 
     @Test
@@ -42,17 +44,15 @@ class VoiceCatalogTest {
     }
 
     @Test
-    fun indonesianIsCeritaNotNewsLabel() {
-        val id = VoiceCatalog.INDONESIAN.first()
-        assertEquals("id_cerita", id.id)
-        assertEquals("Cerita", id.label)
-        assertEquals(0, id.sid)
-        assertEquals(TtsPacks.ID.packId, id.packId)
-        assertTrue(id.traits.contains("storytelling", ignoreCase = true))
-        // Legacy prefs id still resolves to the same soft voice.
-        assertEquals("id_cerita", VoiceCatalog.find("id_news")!!.id)
-        assertEquals("id_cerita", VoiceCatalog.canonicalId("id_news"))
-        assertEquals("id_cerita", VoiceDefaults.indonesianIdAfterCeritaMigration("id_news"))
-        assertEquals("id_cerita", VoiceDefaults.indonesianIdAfterCeritaMigration(null))
+    fun retiredIndonesianPrefsMapToSmooth() {
+        assertEquals("en_lessac", VoiceDefaults.indonesianIdAfterRetirement(null))
+        assertEquals("en_lessac", VoiceDefaults.indonesianIdAfterRetirement("id_news"))
+        assertEquals("en_lessac", VoiceDefaults.indonesianIdAfterRetirement("id_cerita"))
+        assertEquals("en_lessac", VoiceCatalog.canonicalId("id_news"))
+        assertEquals("en_lessac", VoiceCatalog.canonicalId("id_cerita"))
+        assertNull(VoiceCatalog.find("id_cerita"))
+        assertNull(VoiceCatalog.find("id_news"))
+        assertNull(TtsPacks.forLanguage("id"))
+        assertTrue(TtsPacks.packsForLanguage("id").isEmpty())
     }
 }

@@ -19,12 +19,6 @@ Piper English voice (en_US-amy-medium) — Warm
   Downloaded from Voices when Warm is selected:
   https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-medium.tar.bz2
 
-Piper Indonesian voice (id_ID-news_tts-medium)
-  License: MIT (rhasspy/piper-voices catalog)
-  https://huggingface.co/rhasspy/piper-voices
-  Downloaded on first Indonesian listen:
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-id_ID-news_tts-medium.tar.bz2
-
 Apache Commons Compress
   License: Apache-2.0
   Used to extract .tar.bz2 voice packs on device.

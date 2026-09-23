@@ -41,7 +41,7 @@ class NeuralTtsEngine {
             loadedPackId = packId
             // Soft-fail warm-up under the same lock (shrinks release/generate race window).
             runCatching {
-                val warmText = if (language == "id") "Siap." else "Ready."
+                val warmText = "Ready."
                 val gen = GenerationConfig(
                     sid = TtsPacks.PIPER_SID,
                     speed = 1f,
@@ -240,24 +240,36 @@ class NeuralTtsEngine {
             val a = kotlin.math.abs(s)
             if (a > peak) peak = a
         }
-        if (peak <= 1.0f || peak < 1e-4f) return samples
-        val scale = 0.92f / peak
+        if (peak < 1e-4f) return samples
+        // Leave headroom so Warm / Amy peaks don't grit in PCM16.
+        val target = 0.85f
+        if (peak <= target) return samples
+        val scale = target / peak
         val out = FloatArray(samples.size)
         for (i in samples.indices) out[i] = samples[i] * scale
         return out
     }
 
-    /** 16-bit with a 2–5ms edge fade so chunk joins don't click. */
+    /** 16-bit with edge fade + mild soft-clip so peaks don't buzz. */
     private fun toPcm16(samples: FloatArray, sampleRate: Int): ShortArray {
         val n = samples.size
         val out = ShortArray(n)
         val fade = ((sampleRate * 5) / 1000).coerceIn(48, n / 8).coerceAtLeast(1)
         for (i in 0 until n) {
-            var s = samples[i].coerceIn(-1f, 1f)
+            var s = samples[i]
+            // Mild soft knee above ~0.92 instead of hard rail at ±1.
+            val a = kotlin.math.abs(s)
+            if (a > 0.92f) {
+                val sign = if (s >= 0f) 1f else -1f
+                val over = a - 0.92f
+                s = sign * (0.92f + over / (1f + over * 4f))
+            }
+            s = s.coerceIn(-1f, 1f)
             if (i < fade) s *= i.toFloat() / fade
             val tail = n - 1 - i
             if (tail < fade) s *= tail.toFloat() / fade
-            out[i] = (s * 32767f).toInt().coerceIn(-32767, 32767).toShort()
+            // 31200 leaves a little headroom vs full-scale 32767 grit.
+            out[i] = (s * 31200f).toInt().coerceIn(-32767, 32767).toShort()
         }
         return out
     }

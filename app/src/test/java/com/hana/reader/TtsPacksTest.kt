@@ -23,11 +23,12 @@ class TtsPacksTest {
     }
 
     @Test
-    fun indonesianIsPiper() {
-        val pack = TtsPacks.forLanguage("id")!!
-        assertEquals(NeuralKind.Piper, pack.kind)
-        assertTrue(pack.url.contains("id_ID-news_tts-medium"))
-        assertEquals(0, TtsPacks.speakerId("id", VoiceProfile.Hana))
+    fun indonesianNeuralPackRemoved() {
+        assertNull(TtsPacks.forLanguage("id"))
+        assertTrue(TtsPacks.packsForLanguage("id").isEmpty())
+        assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN_WARM), TtsPacks.all())
+        assertNull(TtsPacks.packForVoice("id_news"))
+        assertNull(TtsPacks.packForVoice("id_cerita"))
     }
 
     @Test
@@ -99,9 +100,6 @@ class TtsPacksTest {
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
         assertEquals(TtsPacks.EN_WARM, TtsPacks.packForVoice("en_amy"))
         assertNull(TtsPacks.packForVoice("af_bella"))
-        assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_news"))
-        assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_cerita"))
-        assertEquals("Cerita", TtsPacks.ID.displayName)
         assertEquals(listOf(TtsPacks.EN_SMOOTH, TtsPacks.EN_WARM), TtsPacks.packsForLanguage("en"))
         val caption = TtsPacks.playerCaption(
             "en",
@@ -128,20 +126,18 @@ class TtsPacksTest {
         assertEquals(0.70f, smooth.noiseScaleW)
         val warm = TtsPacks.acousticFor(TtsPacks.EN_WARM.packId)
         assertEquals(1.20f, warm.lengthScale)
-        assertEquals(0.667f, warm.noiseScale)
-        assertEquals(0.85f, warm.noiseScaleW)
-        val id = TtsPacks.acousticFor(TtsPacks.ID.packId)
-        assertEquals(1.30f, id.lengthScale)
-        assertEquals(0.667f, id.noiseScale)
-        assertEquals(0.80f, id.noiseScaleW)
+        assertEquals(0.55f, warm.noiseScale)
+        assertEquals(0.60f, warm.noiseScaleW)
+        // Unknown pack ids fall back to Smooth acoustics (no ID pack).
+        val fallback = TtsPacks.acousticFor("piper-id-news-medium")
+        assertEquals(TtsPacks.SMOOTH_ACOUSTIC, fallback)
     }
 
     @Test
-    fun busyMessageIsCalmAndLocalized() {
+    fun busyMessageIsCalm() {
         assertEquals("Preparing Warm…", TtsPacks.busyMessage("Warm", "en", downloading = false))
         assertEquals("Downloading Soft…", TtsPacks.busyMessage("Soft", "en", downloading = true))
-        assertEquals("Menyiapkan Cerita…", TtsPacks.busyMessage("Cerita", "id", downloading = false))
-        assertEquals("Mengunduh Cerita…", TtsPacks.busyMessage("Cerita", "id", downloading = true))
+        assertEquals("Preparing Soft…", TtsPacks.busyMessage("", "id", downloading = false))
     }
 
     @Test

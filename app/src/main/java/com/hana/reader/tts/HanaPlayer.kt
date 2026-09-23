@@ -194,7 +194,7 @@ class HanaPlayer(context: Context) {
     suspend fun switchVoice(language: String, voiceId: String) {
         val voice = VoiceCatalog.find(voiceId)
         val label = voice?.label ?: VoiceCatalog.find(VoiceCatalog.canonicalId(voiceId))?.label
-            ?: if (language == "id") "Cerita" else "Soft"
+            ?: "Soft"
         prepareMutex.withLock {
             try {
                 voicePrefs.setSelectedVoiceId(language, voiceId)
@@ -286,11 +286,7 @@ class HanaPlayer(context: Context) {
                     neural.prepare(voice.language, files, pack.packId)
                 }
             }
-            val sample = if (voice.language == "id") {
-                "Halo. Ini suara Hana untuk membaca buku secara offline."
-            } else {
-                "Hello. This is Hana, reading softly so long books feel easy."
-            }
+            val sample = "Hello. This is Hana, reading softly so long books feel easy."
             val epoch = synthEpoch.get()
             val pcm = withContext(Dispatchers.Default) {
                 neural.synthesize(sample, voice.language, voice.sid, TtsPacks.DEFAULT_RATE)
@@ -472,7 +468,9 @@ class HanaPlayer(context: Context) {
             }
             return
         }
+        // Indonesian (and other non-EN) books: no neural pack → System TTS only.
         val useNeural = snap.profile == VoiceProfile.Hana &&
+            TtsPacks.packsForLanguage(book.language).isNotEmpty() &&
             neural.isLoadedPack(activePack(book.language).packId)
         _state.value = snap.copy(usingNeural = useNeural)
         if (useNeural) {
@@ -500,6 +498,12 @@ class HanaPlayer(context: Context) {
             // One synth pipeline: fill (or prebuffer) owns generate; play waits for it.
             kickQueueFill(book, sid, speed)
             val head = awaitPlayableHead(book, snap, sid, speed, isFirst) ?: run {
+                // Never skip an unplayed sentence remainder — retry without advancing.
+                if (sentenceRemainder != null) {
+                    Log.w(TAG, "awaitPlayableHead miss with remainder; retrying")
+                    continueSpeaking()
+                    return
+                }
                 advance(1)
                 return
             }
@@ -1016,12 +1020,13 @@ class HanaPlayer(context: Context) {
         const val QUEUE_DEPTH = 4
         /** After a starve, fill aims to have this many extra chunks ready. */
         const val PLAY_RESUME_DEPTH = 2
-        /** EN Piper: first line short enough to start, later lines long enough to keep up. */
+        /**
+         * EN Piper: prefer whole sentences under the soft budget (~300).
+         * Only hard-cap run-ons above EN_SENTENCE_HARD_MAX; always play remainder first.
+         */
         const val EN_LATER_MAX_SENTENCES = 2
-        const val EN_LATER_MAX_CHARS = 280
-        const val ID_LATER_MAX_SENTENCES = 2
-        const val ID_LATER_MAX_CHARS = 280
-        const val EN_FIRST_MAX_CHARS = 120
+        const val EN_LATER_MAX_CHARS = 300
+        const val EN_FIRST_MAX_CHARS = 300
 
         @Volatile private var instance: HanaPlayer? = null
         fun get(context: Context): HanaPlayer {
@@ -1036,11 +1041,10 @@ class HanaPlayer(context: Context) {
             isFirst: Boolean,
             kind: NeuralKind = NeuralKind.Piper
         ): Pair<Int, Int> {
+            // English-only neural; non-EN falls through to System TTS and ignores these.
             return when {
-                language == "en" && isFirst -> 1 to EN_FIRST_MAX_CHARS
-                language == "en" -> EN_LATER_MAX_SENTENCES to EN_LATER_MAX_CHARS
                 isFirst -> 1 to EN_FIRST_MAX_CHARS
-                else -> ID_LATER_MAX_SENTENCES to ID_LATER_MAX_CHARS
+                else -> EN_LATER_MAX_SENTENCES to EN_LATER_MAX_CHARS
             }
         }
 

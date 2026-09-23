@@ -40,14 +40,12 @@ object TtsPacks {
     )
 
     val SMOOTH_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.667f, noiseScaleW = 0.70f)
-    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.20f, noiseScale = 0.667f, noiseScaleW = 0.85f)
-    /** Storytelling pace — slower + gentler than broadcast/news defaults. */
-    val ID_ACOUSTIC = Acoustic(lengthScale = 1.30f, noiseScale = 0.667f, noiseScaleW = 0.80f)
+    /** Cleaner Warm: lower noise than 0.85 W which buzzed on Amy. */
+    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.20f, noiseScale = 0.55f, noiseScaleW = 0.60f)
 
     fun acousticFor(packId: String): Acoustic = when (packId) {
-        EN_SMOOTH.packId -> SMOOTH_ACOUSTIC
         EN_WARM.packId -> WARM_ACOUSTIC
-        else -> ID_ACOUSTIC
+        else -> SMOOTH_ACOUSTIC
     }
 
     val EN_SMOOTH = TtsPack(
@@ -73,30 +71,16 @@ object TtsPacks {
         storageKey = "en-amy"
     )
 
-    /** Official sherpa pack is news_tts; we brand + tune it as soft Cerita storytelling. */
-    val ID = TtsPack(
-        language = "id",
-        kind = NeuralKind.Piper,
-        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-id_ID-news_tts-medium.tar.bz2",
-        archiveName = "vits-piper-id_ID-news_tts-medium.tar.bz2",
-        minArchiveBytes = 40L * 1024 * 1024,
-        packId = "piper-id-news-medium",
-        displayName = "Cerita",
-        storageKey = "id"
-    )
-
-    fun all(): List<TtsPack> = listOf(EN_SMOOTH, EN_WARM, ID)
+    fun all(): List<TtsPack> = listOf(EN_SMOOTH, EN_WARM)
 
     fun forLanguage(language: String): TtsPack? = when (language) {
         "en", "en-smooth" -> EN_SMOOTH
         "en-amy" -> EN_WARM
-        "id" -> ID
         else -> null
     }
 
     fun packsForLanguage(language: String): List<TtsPack> = when (language) {
         "en" -> listOf(EN_SMOOTH, EN_WARM)
-        "id" -> listOf(ID)
         else -> emptyList()
     }
 
@@ -108,24 +92,19 @@ object TtsPacks {
     }
 
     fun speakerId(language: String, profile: VoiceProfile, selectedSid: Int? = null): Int {
-        if (language == "id") return PIPER_SID
         return selectedSid ?: PIPER_SID
     }
 
     fun voiceName(language: String, profile: VoiceProfile, selectedId: String? = null): String {
         if (selectedId != null) return VoiceCatalog.find(selectedId)?.name ?: selectedId
-        return if (language == "id") "cerita" else "lessac"
+        return "lessac"
     }
 
 
     /** Calm wait copy while OfflineTts prepares / downloads. */
     fun busyMessage(voiceLabel: String, language: String, downloading: Boolean = false): String {
-        val name = voiceLabel.ifBlank { if (language == "id") "Cerita" else "Soft" }
-        return if (language == "id") {
-            if (downloading) "Mengunduh $name…" else "Menyiapkan $name…"
-        } else {
-            if (downloading) "Downloading $name…" else "Preparing $name…"
-        }
+        val name = voiceLabel.ifBlank { "Soft" }
+        return if (downloading) "Downloading $name…" else "Preparing $name…"
     }
 
     /** Short label for the mini player: what is speaking + how to switch. */

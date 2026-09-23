@@ -4,6 +4,7 @@ import com.hana.reader.tts.TtsPacks
 import com.hana.reader.tts.VoiceSwitchLogic
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,8 +27,8 @@ class VoiceSwitchLogicTest {
         assertEquals(TtsPacks.EN_SMOOTH, TtsPacks.packForVoice("en_lessac"))
         assertEquals(TtsPacks.EN_WARM, TtsPacks.packForVoice("en_amy"))
         assertEquals(TtsPacks.EN_WARM.storageKey, TtsPacks.packForVoice("en_amy")!!.storageKey)
-        assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_news"))
-        assertEquals(TtsPacks.ID, TtsPacks.packForVoice("id_cerita"))
+        assertNull(TtsPacks.packForVoice("id_news"))
+        assertNull(TtsPacks.packForVoice("id_cerita"))
     }
 
 

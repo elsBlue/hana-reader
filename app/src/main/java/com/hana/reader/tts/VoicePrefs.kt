@@ -4,14 +4,18 @@ import android.content.Context
 
 object VoiceDefaults {
     const val COMFORT_FLAG = "comfort_listen_v1"
+    /** One-shot: drop retired Indonesian neural prefs (News/Cerita). */
+    const val ID_RETIRED_FLAG = "id_neural_retired_v1"
+    @Deprecated("Use ID_RETIRED_FLAG")
     const val ID_CERITA_FLAG = "id_cerita_v1"
 
     private val WARM_LEGACY_IDS = setOf(
         "af_bella", "af_nicole", "af_sky", "bf_emma", "bf_isabella"
     )
 
-    fun defaultId(language: String): String =
-        if (language == "id") "id_cerita" else "en_lessac"
+    private val RETIRED_ID_IDS = setOf("id_news", "id_cerita")
+
+    fun defaultId(language: String): String = "en_lessac"
 
     /**
      * Old factory default was Bella/Kokoro. Treat unset + Bella as Smooth
@@ -29,12 +33,18 @@ object VoiceDefaults {
         return if (saved in WARM_LEGACY_IDS) "en_amy" else "en_lessac"
     }
 
-    /** News → Cerita: keep the same pack, new catalog id + softer defaults. */
-    fun indonesianIdAfterCeritaMigration(saved: String?): String {
-        if (saved == null || saved == "id_news") return "id_cerita"
+    /**
+     * Indonesian neural packs retired — map old prefs to Smooth (English catalog)
+     * so SharedPreferences do not keep dangling id_* ids.
+     */
+    fun indonesianIdAfterRetirement(saved: String?): String {
+        if (saved == null || saved in RETIRED_ID_IDS) return "en_lessac"
         return VoiceCatalog.canonicalId(saved).takeIf { VoiceCatalog.find(it) != null }
-            ?: "id_cerita"
+            ?: "en_lessac"
     }
+
+    @Deprecated("Indonesian neural retired", ReplaceWith("indonesianIdAfterRetirement(saved)"))
+    fun indonesianIdAfterCeritaMigration(saved: String?): String = indonesianIdAfterRetirement(saved)
 }
 
 class VoicePrefs(context: Context) {
@@ -42,8 +52,10 @@ class VoicePrefs(context: Context) {
 
     fun selectedVoiceId(language: String): String {
         migrateComfortOnce()
-        migrateIdCeritaOnce()
-        val key = key(language)
+        migrateIdRetiredOnce()
+        // Neural catalog is English-only; ID books use System TTS (no neural pack).
+        val keyLang = if (language == "id") "en" else language
+        val key = key(keyLang)
         val saved = prefs.getString(key, null)
         if (saved != null && VoiceCatalog.find(saved) != null) {
             val canonical = VoiceCatalog.canonicalId(saved)
@@ -52,11 +64,7 @@ class VoicePrefs(context: Context) {
             }
             return canonical
         }
-        val migrated = if (language == "id") {
-            VoiceDefaults.indonesianIdAfterCeritaMigration(saved)
-        } else {
-            VoiceDefaults.resolveEnglishId(saved)
-        }
+        val migrated = VoiceDefaults.resolveEnglishId(saved)
         if (saved != migrated) {
             prefs.edit().putString(key, migrated).apply()
         }
@@ -69,10 +77,11 @@ class VoicePrefs(context: Context) {
     }
 
     fun setSelectedVoiceId(language: String, voiceId: String) {
+        val keyLang = if (language == "id") "en" else language
         prefs.edit()
-            .putString(key(language), VoiceCatalog.canonicalId(voiceId))
+            .putString(key(keyLang), VoiceCatalog.canonicalId(voiceId))
             .putBoolean(VoiceDefaults.COMFORT_FLAG, true)
-            .putBoolean(VoiceDefaults.ID_CERITA_FLAG, true)
+            .putBoolean(VoiceDefaults.ID_RETIRED_FLAG, true)
             .apply()
     }
 
@@ -88,12 +97,19 @@ class VoicePrefs(context: Context) {
             .apply()
     }
 
-    private fun migrateIdCeritaOnce() {
-        if (prefs.getBoolean(VoiceDefaults.ID_CERITA_FLAG, false)) return
-        val next = VoiceDefaults.indonesianIdAfterCeritaMigration(prefs.getString(key("id"), null))
+    private fun migrateIdRetiredOnce() {
+        if (prefs.getBoolean(VoiceDefaults.ID_RETIRED_FLAG, false)) return
+        val oldId = prefs.getString(key("id"), null)
+        val next = VoiceDefaults.indonesianIdAfterRetirement(oldId)
+        // Fold any retired id_* selection into the English Smooth default; drop voice_id key.
         prefs.edit()
-            .putBoolean(VoiceDefaults.ID_CERITA_FLAG, true)
-            .putString(key("id"), next)
+            .putBoolean(VoiceDefaults.ID_RETIRED_FLAG, true)
+            .remove(key("id"))
+            .apply {
+                if (prefs.getString(key("en"), null) == null) {
+                    putString(key("en"), next)
+                }
+            }
             .apply()
     }
 
