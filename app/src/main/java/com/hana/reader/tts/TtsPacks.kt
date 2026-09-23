@@ -40,8 +40,8 @@ object TtsPacks {
     )
 
     val SMOOTH_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.667f, noiseScaleW = 0.70f)
-    /** Cleaner Warm: a touch faster than 1.20, slightly less end buzz; packId unchanged. */
-    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.50f, noiseScaleW = 0.55f)
+    /** Cleaner Warm: quieter buzz (noise 0.42 / 0.48); packId unchanged. */
+    val WARM_ACOUSTIC = Acoustic(lengthScale = 1.15f, noiseScale = 0.42f, noiseScaleW = 0.48f)
 
     fun acousticFor(packId: String): Acoustic = when (packId) {
         EN_WARM.packId -> WARM_ACOUSTIC

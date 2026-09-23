@@ -529,6 +529,7 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
     val voices = remember(lang) { VoiceCatalog.forLanguage(lang) }
     val selectedId = prefs.selectedVoiceId(lang)
     val switching = snap.busy
+    var showVoiceSettings by remember { mutableStateOf(false) }
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -641,6 +642,13 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
                 }
                 Spacer(Modifier.weight(1f))
                 IconButton(
+                    onClick = { showVoiceSettings = true },
+                    enabled = !switching,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = "Voice settings", tint = Muted)
+                }
+                IconButton(
                     onClick = { nav.navigate("voices") },
                     modifier = Modifier.size(36.dp)
                 ) {
@@ -648,6 +656,13 @@ private fun MiniPlayer(nav: NavHostController, modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+    if (showVoiceSettings) {
+        VoiceSettingsSheet(
+            language = lang,
+            voiceId = selectedId,
+            onDismiss = { showVoiceSettings = false },
+        )
     }
 }
 

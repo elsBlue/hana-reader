@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -77,6 +78,7 @@ fun VoicesScreen(nav: NavHostController) {
     var incompleteKeys by remember { mutableStateOf(emptySet<String>()) }
     var status by remember { mutableStateOf<String?>(null) }
     var previewing by remember { mutableStateOf(false) }
+    var showVoiceSettings by remember { mutableStateOf(false) }
 
     val download by models.downloadState.collectAsState()
 
@@ -141,6 +143,9 @@ fun VoicesScreen(nav: NavHostController) {
                 Text("VOICES", color = Muted, fontSize = 11.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Medium)
                 Text("Choose how Hana reads", fontFamily = FontFamily.Serif, fontSize = 22.sp, color = Ink)
             }
+            IconButton(onClick = { showVoiceSettings = true }) {
+                Icon(Icons.Default.Tune, contentDescription = "Voice settings", tint = Ink)
+            }
         }
 
         Text(
@@ -149,6 +154,15 @@ fun VoicesScreen(nav: NavHostController) {
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
         )
+
+        TextButton(
+            onClick = { showVoiceSettings = true },
+            modifier = Modifier.padding(horizontal = 12.dp),
+        ) {
+            Icon(Icons.Default.Tune, contentDescription = null, tint = Rose, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Voice settings — speed, pace, texture", color = Rose)
+        }
 
         Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
             Text(
@@ -255,6 +269,14 @@ fun VoicesScreen(nav: NavHostController) {
                 )
             }
         }
+    }
+
+    if (showVoiceSettings) {
+        VoiceSettingsSheet(
+            language = langTab,
+            voiceId = selectedId,
+            onDismiss = { showVoiceSettings = false },
+        )
     }
 }
 
